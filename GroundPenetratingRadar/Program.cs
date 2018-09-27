@@ -1,94 +1,168 @@
-﻿using System;
+﻿using System.Drawing;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using TestStack.White;
-using TestStack.White.UIItems;
-using TestStack.White.UIItems.Finders;
-using TestStack.White.UIItems.WindowItems;
 using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Runtime.InteropServices;
+using System;
+using System.Drawing.Imaging;
+using System.Windows.Forms;
 
 namespace GroundPenetratingRadar
 {
+
     class Program
     {
 
-        //basically just to get the ball rolling at the moment
+        //SetForegroundWindow();
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(int hWnd);
+
+        // Define the SetWindowPos API function.
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool SetWindowPos(IntPtr hWnd,
+            IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+
+        //get PID from thread
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        //This is a replacement for Cursor.Position in WinForms
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern bool SetCursorPos(int x, int y);
+
+        //Mouse Event System Function Connection
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
+
+        public const int MOUSEEVENTF_LEFTDOWN = 0x02;
+        public const int MOUSEEVENTF_LEFTUP = 0x04;
+        public const int MOUSEEVENTF_RIGHTDOWN = 0x08;
+        public const int MOUSEEVENTF_RIGHTUP = 0x10;
+
+        //grab screenshot of entire screen
+        static public void Screenie(Process proc)
+        {
+            var bmp = new Bitmap(540, 288, PixelFormat.Format32bppArgb);
+            Graphics graphics = Graphics.FromImage(bmp);
+            graphics.CopyFromScreen(100, 100, 0, 0, new Size(540, 288), CopyPixelOperation.SourceCopy);
+
+            bmp.Save("c:\\Users\\Lou\\Desktop\\test.png", ImageFormat.Png);
+        }
+
+        //send left click
+        public static void LeftClick(int y, int x)
+        {
+            int ypos = 109 + y * 18;
+            int xpos = 109 + x * 18;
+            SetCursorPos(xpos, ypos);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, xpos, ypos, 0, 0);
+            Debug.WriteLine("Left clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
+        }
+
+        //send right click
+        public static void rightClick(int x, int y)
+        {
+            int xpos = 109 + x * 18;
+            int ypos = 109 + y * 18;
+            SetCursorPos(xpos, ypos);
+            mouse_event(MOUSEEVENTF_RIGHTDOWN, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_RIGHTUP, xpos, ypos, 0, 0);
+        }
+
+        //pop up an alert box for the user with provided message
+        static void errorMessage(String message)
+        {
+            string caption = "Error Detected in Input";
+            MessageBoxButtons buttons = MessageBoxButtons.OK;
+            MessageBox.Show(message, caption, buttons);
+        }
+
+        //let's see if we find mindsweeper running
         static void Main(string[] args)
         {
             Process[] processes = Process.GetProcessesByName(@"Minesweeper");
 
             if (processes.Length == 1)
             {
-                var application = Application.Attach(processes[0]);
-                LetsAGo(application);
+                LetsAGo(processes[0].Id);
             }
             else
             {
-                Console.WriteLine("Looks like she wasn't running, bud, sorry");
+                Debug.WriteLine("Looks like she wasn't running, bud, sorry");
             }
             System.Threading.Thread.Sleep(5000);
         }
-
+      
         //running some initiation functions then pointing to the main loop
-        static void LetsAGo(Application application)
+        static void LetsAGo(int procID)
         {
-            //Console.Write(application.GetWindows());
-            Window window = application.GetWindow("Minesweeper");
-            window.SetForeground();
-            //let's check the difficulty (to write later)
+
+            Process proc = Process.GetProcessById(procID);
+            Int32 proci32 = proc.MainWindowHandle.ToInt32();
+
+            // window dimensions
+            int tlx = 100;
+            int tly = 100;
+            int width = 480;
+            int height = 280;
+            //move and resize window because getting existing window dimensions and location didn't work out
+            SetWindowPos(proc.MainWindowHandle, (IntPtr)0, tlx - 52, tly - 95, width, height, 0);
+
+            SetForegroundWindow(proc.MainWindowHandle.ToInt32()); // make it the active window
 
             //define our quick access data representation of board and the reference to code version
             Boards boards = new Boards();
+            boards.InitializeNodes(); //set all squares to unknown tile
 
+            Images images = new Images(); //our "everything to do with bitmaps and tile ID" class instance
 
-            //let's go through and populate our groupbox info with data references to save time, also 10ify the nodes array
-            for (int i = 1; i < 17; i++)
-            {
-                SearchCriteria searchCriteria = SearchCriteria.ByText("Row " + i.ToString());
-                boards.rows[i - 1] = (GroupBox)window.Get<GroupBox>(searchCriteria);
-                for (int j = 0; j < 30; j++)
-                {
-                    boards.nodes[i - 1, j] = 10;
-                }
-            }
+            //for debugging: Screenie(proc);
 
-            Console.WriteLine("");
+            System.Threading.Thread.Sleep(300);
 
-            //get that first point done. 8,15 is the middle, i.e. the spot the least likely to get corner stuck
-            LeftClick(boards, 8, 15);
-            UpdateGridByPoint(boards, 8, 15);
+            //Make the first move. 8,15 is the middle, i.e. the spot the least likely to get corner stuck
+            LeftClick(8, 15);
+            //UpdateGridByPoint(boards, 8, 15); -----is this necessary by colour?----
 
             // main loop, baby
             Boolean complete = false;
             int[,,] nextMoves = new int[10, 1, 1];
             while (complete == false)
             {
+                System.Threading.Thread.Sleep(300);
+
+                images.updateScreenie();
+                UpdateGrid(boards, images);
+                //printBoard(boards); for console debugging
 
                 //first do a check for obvious moves, and if any are found, save them as basicResults
-                printBoard(boards);
                 var basicResults = CheckBasics(boards);
-                //if there are basic moves to make handle them, update board from them, move on
+
                 if (basicResults.Item1.Count != 0 || basicResults.Item2.Count != 0)
                 {
                     printBoard(boards);
                     while (basicResults.Item1.Count != 0)
                     {
                         int[] pos = basicResults.Item1.Pop();
-                        DoubleLeftClick(boards, pos[0], pos[1]);
+                        //DoubleLeftClick(boards, pos[0], pos[1]);
                     }
                     while (basicResults.Item2.Count != 0)
                     {
                         int[] pos = basicResults.Item2.Pop();
-                        RightClick(boards, pos[0], pos[1]);
+                        //RightClick(boards, pos[0], pos[1]);
                     }
                 } else { //if advanced
 
                     // check heuristics
                     // call basic inverted edge reading
-                    Console.WriteLine();//go to advanced
+                    Debug.WriteLine("no basic moves found");//go to advanced
+                    SetForegroundWindow(proci32);
                 } 
 
                 complete = true;
@@ -96,16 +170,16 @@ namespace GroundPenetratingRadar
         }
 
         //method to update grid, only updating values which are still unknown, to save processing power
-        static void UpdateGrid(Boards boards)
+        static void UpdateGrid(Boards boards, Images images)
         {
             for (int i = 1; i < 16; i++)
             {
-                Console.WriteLine("Row: " + i.ToString());
+                Debug.WriteLine("Row: " + i.ToString());
                 for (int j = 0; j < 30; j++)
                 {
                     if (boards.nodes[i, j] == 10)
                     {
-                        boards.nodes[i, j] = TileID(boards, i, j);
+                        boards.nodes[i, j] = images.TileID(i, j);
                     }
                 }
             }
@@ -113,10 +187,10 @@ namespace GroundPenetratingRadar
 
         //expands a square grid outwards from a point to identify changes, comparing # of unkowns
         //this method should be replaced with a more efficient edge-huggin-expansion algorithm
-        static Boolean UpdateGridByPoint(Boards boards, int r, int c)
+        static Boolean UpdateGridByPoint(Images images, Boards boards, int r, int c)
         {
             // CURRENTLY: implicit that this is called ONLY after cicked a point, so check the given point
-            int firstTileID = TileID(boards, r, c);
+            int firstTileID = images.TileID(r, c);
             if (boards.nodes[r, c] != firstTileID) {
                 boards.nodes[r, c] = firstTileID;
             }
@@ -144,7 +218,7 @@ namespace GroundPenetratingRadar
                 if (lc != -1) {
                     for (int k = tr + 1; k <= br - 1; k++) {
                         if (boards.nodes[k, lc] == 10) {
-                            tmpTileID = TileID(boards, k, lc);
+                            tmpTileID = images.TileID(k, lc);
                             if (boards.nodes[k, lc] != tmpTileID) {
                                 boards.nodes[k, lc] = tmpTileID;
                                 complete = false;
@@ -156,7 +230,7 @@ namespace GroundPenetratingRadar
                 if (rc != 31) {
                     for (int k = tr + 1; k <= br - 1; k++) {
                         if (boards.nodes[k, rc] == 10) {
-                            tmpTileID = TileID(boards, k, rc);
+                            tmpTileID = images.TileID(k, rc);
                             if (boards.nodes[k, rc] != tmpTileID) {
                                 boards.nodes[k, rc] = tmpTileID;
                                 complete = false;
@@ -170,7 +244,7 @@ namespace GroundPenetratingRadar
                 if (tr != -1) {
                     for (int k = lc; k <= rc; k++) {
                         if (boards.nodes[tr, k] == 10) {
-                            tmpTileID = TileID(boards, tr, k);
+                            tmpTileID = images.TileID(tr, k);
                             if (boards.nodes[tr, k] != tmpTileID) {
                                 boards.nodes[tr, k] = tmpTileID;
                                 complete = false;
@@ -182,7 +256,7 @@ namespace GroundPenetratingRadar
                 if (tr != -1) {
                     for (int k = lc; k <= rc; k++) {
                         if (boards.nodes[tr, k] == 10) {
-                            tmpTileID = TileID(boards, tr, k);
+                            tmpTileID = images.TileID(tr, k);
                             if (boards.nodes[tr, k] != tmpTileID) {
                                 boards.nodes[tr, k] = tmpTileID;
                                 complete = false;
@@ -192,7 +266,7 @@ namespace GroundPenetratingRadar
                 }
 
                 counter++;
-                Console.WriteLine("Finished scanning box " + counter.ToString());
+                Debug.WriteLine("Finished scanning box " + counter.ToString());
             }
             return true;
         }
@@ -260,7 +334,7 @@ namespace GroundPenetratingRadar
         {
             if (r == 9 && c == 14)
             {
-                Console.WriteLine("WE HIT THE PROBLEMED CASE HERE");
+                Debug.WriteLine("WE HIT THE PROBLEMED CASE HERE");
             }
             int num = boards.nodes[r, c];
             int mines = 0, unknowns = 0;
@@ -326,27 +400,10 @@ namespace GroundPenetratingRadar
                 boards.nodes[r, c] = 0;
             }
 
-            Console.WriteLine("Checking tile r=" + r.ToString() + " c=" + c.ToString());
+            Debug.WriteLine("Checking tile r=" + r.ToString() + " c=" + c.ToString());
 
             //tuple with info
             return (doubleClick, rightClicks);
-        }
-
-        //grab the tile name 
-        static int TileID(Boards boards, int i, int j)
-        {
-            String name = boards.rows[i].Items[j].Name;
-            if (name.Contains("No M")) { return 0; } // empty space
-            else if (name.Contains("1 M")) { return 1; } // touching 1
-            else if (name.Contains("2 M")) { return 2; }
-            else if (name.Contains("3 M")) { return 3; }
-            else if (name.Contains("4 M")) { return 4; }
-            else if (name.Contains("5 M")) { return 5; }
-            else if (name.Contains("6 M")) { return 6; }
-            else if (name.Contains("7 M")) { return 7; }
-            else if (name.Contains("8 M")) { return 8; } //surrounded by mines, incredibly unlikely to surface
-            else if (name.Contains("(Con")) { return 10; } //surrounded by mines, incredibly unlikely to surface
-            else { Console.WriteLine(name); return 9; } //mine (this should never ever happen)
         }
 
         //when optimising, fill this out!!
@@ -368,14 +425,14 @@ namespace GroundPenetratingRadar
 
         }
 
-        static void LeftClick(Boards boards, int r, int c) { boards.rows[r].Items[c].Click(); }
-        static void DoubleLeftClick(Boards boards, int r, int c) { boards.rows[r].Items[c].DoubleClick(); }
-        static void RightClick(Boards boards, int r, int c) { boards.rows[r].Items[c].RightClick(); }
+        //static void LeftClick(Boards boards, int r, int c) { boards.rows[r].Items[c].Click(); }
+        //static void DoubleLeftClick(Boards boards, int r, int c) { boards.rows[r].Items[c].DoubleClick(); }
+        //static void RightClick(Boards boards, int r, int c) { boards.rows[r].Items[c].RightClick(); }
 
         //prints a copy of the board as understood by the nodes array in the console for debugging purposes
         static void printBoard(Boards boards)
         {
-            Console.WriteLine("Beginning board debug print");
+            Debug.WriteLine("Beginning board debug print");
             for (int i = 0; i < 16; i++)
             {
                 for (int j = 0; j < 30; j++)
@@ -409,14 +466,147 @@ namespace GroundPenetratingRadar
             }
         }
 
+        /*
+        private Image ScreenGrab()
+        {
+
+            return null;
+        }
+        */
+
         //do some fancy shit on the matrix and try to find where some moves are
 
     }
 
     public class Boards
     {
+
         public int[,] nodes = new int[16, 30];
-        public GroupBox[] rows = new GroupBox[16];
+
+        public void InitializeNodes()
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                for (int j = 0; j < 30; j++)
+                {
+                    nodes[i, j] = 10;
+                }
+            }
+        }
+
+    }
+
+    //this class holds the template images of the buttons (used for comparison
+    //it also contains all functions related to manipulating the images
+    public class Images
+    {
+
+        static Bitmap initializeScreenie(int height, int width)
+        {
+            return new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        }
+
+        //dimensions of the gameboard
+        public int toplefty = 100;
+        public int topleftx = 100;
+
+        public Bitmap scr = initializeScreenie(540, 288); // holds the current game board screenshot
+        public Bitmap i1 = new Bitmap(@"../../images/1.bmp");
+        public Bitmap i2 = new Bitmap(@"../../images/2.bmp");
+        public Bitmap i3 = new Bitmap(@"../../images/3.bmp");
+        public Bitmap i4 = new Bitmap(@"../../images/4.bmp");
+        public Bitmap i5 = new Bitmap(@"../../images/5.bmp");
+        public Bitmap i6 = new Bitmap(@"../../images/6.bmp");
+        //public Bitmap i7 = new Bitmap(@"../../images/7.bmp");
+        //public Bitmap i8 = new Bitmap(@"../../images/8.bmp");
+        public Bitmap i0 = new Bitmap(@"../../images/e.bmp"); // empty
+        public Bitmap i9 = new Bitmap(@"../../images/f.bmp"); // flag
+        public Bitmap i10 = new Bitmap(@"../../images/u.bmp"); // unknown
+
+        public void updateScreenie()
+        {
+            Graphics graphics = Graphics.FromImage(scr);
+            graphics.CopyFromScreen(topleftx, toplefty, 0, 0, new Size(540, 288), CopyPixelOperation.SourceCopy);
+            scr = new Bitmap(540, 288, graphics);
+        }
+
+        // return a int value corresponding to the tile of at a grid coordinate
+        // 0 is empty or already solved tile
+        // 1-8 are straightforward
+        // 9 is a mine
+        // 10 is an unclicked tile
+        public int TileID(int i, int j)
+        {
+            Bitmap actual = tileImage(i, j);
+            //code below used while debugging to save a copy of the image of the tile to file
+            //scr.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
+            if (imgCom(actual, i0)) { return 0; }
+            if (imgCom(actual, i1)) { return 1; }
+            if (imgCom(actual, i2)) { return 2; }
+            if (imgCom(actual, i3)) { return 3; }
+            if (imgCom(actual, i4)) { return 4; }
+            if (imgCom(actual, i5)) { return 5; }
+            if (imgCom(actual, i6)) { return 6; }
+            //if (imgCom(actual, i7)) { return 7; }
+            //if (imgCom(actual, i8)) { return 8; }
+            if (imgCom(actual, i9)) { return 9; }
+            if (imgCom(actual, i10)) { return 10; }
+
+            //if all else fails
+            errorMessage("Could not identify tile ID at row: " + i.ToString() + ", column: " + j.ToString());
+            Environment.Exit(0);
+            return 0;
+        }
+
+        public Bitmap tileImage (int i, int j)
+        {
+            int x = topleftx + j * 18;
+            int y = toplefty + i * 18;
+            // Clone a portion of the Bitmap object.
+            Rectangle cloneRect = new Rectangle(x, y, 18, 18);
+            return scr.Clone(cloneRect, scr.PixelFormat);
+        }
+
+        //compare two images for similarity
+        //returns 1 for within 20% tolerance
+        //returns 0 for out of tolerance, -1 for size mismatch
+        static Boolean imgCom(Bitmap im1, Bitmap im2)
+        {
+
+            if (im1.Size.Height != 18 || im1.Size.Width != 18)
+            {
+                errorMessage("bad input to imgCom");
+                Environment.Exit(0);
+                return false;
+            }
+            if (im2.Size.Height != 18 || im2.Size.Width != 18)
+            {
+                errorMessage("bad input to imgCom");
+                Environment.Exit(0); 
+                return false;
+            }
+
+            float diff = 0;
+
+            for (int y = 0; y < im1.Height; y++)
+            {
+                for (int x = 0; x < im1.Width; x++)
+                {
+                    diff += (float)Math.Abs(im1.GetPixel(x, y).R - im2.GetPixel(x, y).R) / 255;
+                    diff += (float)Math.Abs(im1.GetPixel(x, y).G - im2.GetPixel(x, y).G) / 255;
+                    diff += (float)Math.Abs(im1.GetPixel(x, y).B - im2.GetPixel(x, y).B) / 255;
+                }
+            }
+            if (20 > 100 * diff / (im1.Width * im1.Height * 3))  { return true; } else { return false; }
+
+        }
+
+        static void errorMessage (String message)
+        {
+            string caption = "Error Detected in Input";
+            MessageBoxButtons buttons = MessageBoxButtons.OK;
+            MessageBox.Show(message, caption, buttons);
+        }
     }
 }
 
