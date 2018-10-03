@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
+using SimWinInput;
 
 namespace GroundPenetratingRadar
 {
@@ -38,11 +39,12 @@ namespace GroundPenetratingRadar
         //Mouse Event System Function Connection
         [System.Runtime.InteropServices.DllImport("user32.dll")]
         public static extern void mouse_event(int dwFlags, int dx, int dy, int cButtons, int dwExtraInfo);
-
-        public const int MOUSEEVENTF_LEFTDOWN = 0x02;
-        public const int MOUSEEVENTF_LEFTUP = 0x04;
-        public const int MOUSEEVENTF_RIGHTDOWN = 0x08;
-        public const int MOUSEEVENTF_RIGHTUP = 0x10;
+        public const int MOUSEEVENTF_ABSOLUTE = 0x8000;
+        public const int MOUSEEVENTF_MOVE = 0x0001;
+        public const int MOUSEEVENTF_LEFTDOWN = 0x002;
+        public const int MOUSEEVENTF_LEFTUP = 0x0004;
+        public const int MOUSEEVENTF_RIGHTDOWN = 0x0008;
+        public const int MOUSEEVENTF_RIGHTUP = 0x0010;
 
         //grab screenshot of entire screen
         static public void Screenie(Process proc)
@@ -57,11 +59,17 @@ namespace GroundPenetratingRadar
         //send left click
         public static void LeftClick(int y, int x)
         {
-            int ypos = 109 + y * 18;
-            int xpos = 109 + x * 18;
-            SetCursorPos(xpos, ypos);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, xpos, ypos, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, xpos, ypos, 0, 0);
+            // add code to make this independant of screen size: Rectangle screenSize = Screen.PrimaryScreen.Bounds;
+            int ypos = (int)(65536.0 / 1080 * (109 + y * 18));
+            int xpos = (int)(65536.0 / 1920 * (109 + x * 18));
+
+            //SimMouse.Click(MouseButtons.Left, xpos, ypos, 10);
+
+            //SetCursorPos(xpos, ypos);
+            mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+
             Debug.WriteLine("Left clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
         }
 
@@ -501,7 +509,7 @@ namespace GroundPenetratingRadar
     public class Images
     {
 
-        static Bitmap initializeScreenie(int height, int width)
+        static Bitmap initializeScreenie(int width, int height)
         {
             return new Bitmap(width, height, PixelFormat.Format32bppArgb);
         }
@@ -526,8 +534,9 @@ namespace GroundPenetratingRadar
         public void updateScreenie()
         {
             Graphics graphics = Graphics.FromImage(scr);
-            graphics.CopyFromScreen(topleftx, toplefty, 0, 0, new Size(540, 288), CopyPixelOperation.SourceCopy);
-            scr = new Bitmap(540, 288, graphics);
+            graphics.CopyFromScreen(topleftx, toplefty, 0, 0, new Size(540, 288));
+            graphics.Dispose();
+            //Debug.WriteLine("board image printed");
         }
 
         // return a int value corresponding to the tile of at a grid coordinate
@@ -552,6 +561,8 @@ namespace GroundPenetratingRadar
             if (imgCom(actual, i9)) { return 9; }
             if (imgCom(actual, i10)) { return 10; }
 
+            //actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
+            //scr.Save("c:\\Users\\Lou\\Desktop\\board.png", ImageFormat.Png);
             //if all else fails
             errorMessage("Could not identify tile ID at row: " + i.ToString() + ", column: " + j.ToString());
             Environment.Exit(0);
@@ -560,8 +571,8 @@ namespace GroundPenetratingRadar
 
         public Bitmap tileImage (int i, int j)
         {
-            int x = topleftx + j * 18;
-            int y = toplefty + i * 18;
+            int x = j * 18;
+            int y = i * 18;
             // Clone a portion of the Bitmap object.
             Rectangle cloneRect = new Rectangle(x, y, 18, 18);
             return scr.Clone(cloneRect, scr.PixelFormat);
