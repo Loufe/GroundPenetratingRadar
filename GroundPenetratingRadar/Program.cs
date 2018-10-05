@@ -148,9 +148,11 @@ namespace GroundPenetratingRadar
                 images.updateScreenie();
                 UpdateGrid(boards, images);
                 //printBoard(boards); for console debugging
-
+                
                 //first do a check for obvious moves, and if any are found, save them as basicResults
                 var basicResults = CheckBasics(boards);
+
+                //printBoard(boards)
 
                 if (basicResults.Item1.Count != 0 || basicResults.Item2.Count != 0)
                 {
@@ -180,7 +182,7 @@ namespace GroundPenetratingRadar
         //method to update grid, only updating values which are still unknown, to save processing power
         static void UpdateGrid(Boards boards, Images images)
         {
-            for (int i = 1; i < 16; i++)
+            for (int i = 0; i < 16; i++)
             {
                 Debug.WriteLine("Row: " + i.ToString());
                 for (int j = 0; j < 30; j++)
@@ -340,10 +342,12 @@ namespace GroundPenetratingRadar
         // given a passed position in nodes, determine neighbouring mine and empty count and do something about it
         static (Boolean, Stack<int[]>) CheckTouching(Boards boards, int r, int c)
         {
+            /*
             if (r == 9 && c == 14)
             {
                 Debug.WriteLine("WE HIT THE PROBLEMED CASE HERE");
             }
+            */
             int num = boards.nodes[r, c];
             int mines = 0, unknowns = 0;
             int[,] tiles = new int[8, 3];
@@ -441,20 +445,20 @@ namespace GroundPenetratingRadar
         static void printBoard(Boards boards)
         {
             Debug.WriteLine("Beginning board debug print");
-            for (int i = 0; i < 16; i++)
+            for (int r = 0; r < 16; r++)
             {
-                for (int j = 0; j < 30; j++)
+                for (int c = 0; c < 30; c++)
                 {
                     //uniformity of spacing for all values < 10
-                    if (boards.nodes[i, j] == 10)
+                    if (boards.nodes[r, c] == 10)
                     {
-                        Console.Write(boards.nodes[i, j].ToString() + " ");
+                        Debug.Write(boards.nodes[r, c].ToString() + " ");
                     } else
                     {
-                        Console.Write(boards.nodes[i, j].ToString() + "  ");
+                        Debug.Write(boards.nodes[r, c].ToString() + "  ");
                     }
                 }
-                Console.WriteLine();
+                Debug.WriteLine("");
             }
         }
 
@@ -493,11 +497,11 @@ namespace GroundPenetratingRadar
 
         public void InitializeNodes()
         {
-            for (int i = 0; i < 16; i++)
+            for (int r = 0; r < 16; r++)
             {
-                for (int j = 0; j < 30; j++)
+                for (int c = 0; c < 30; c++)
                 {
-                    nodes[i, j] = 10;
+                    nodes[r, c] = 10;
                 }
             }
         }
@@ -529,7 +533,10 @@ namespace GroundPenetratingRadar
         //public Bitmap i8 = new Bitmap(@"../../images/8.bmp");
         public Bitmap i0 = new Bitmap(@"../../images/e.bmp"); // empty
         public Bitmap i9 = new Bitmap(@"../../images/f.bmp"); // flag
-        public Bitmap i10 = new Bitmap(@"../../images/u.bmp"); // unknown
+        public Bitmap i10_1 = new Bitmap(@"../../images/u_1.bmp"); // unknown lightest variant
+        public Bitmap i10_2 = new Bitmap(@"../../images/u_2.bmp"); // unknown light variant
+        public Bitmap i10_3 = new Bitmap(@"../../images/u_3.bmp"); // unknown dark variant
+        public Bitmap i10_4 = new Bitmap(@"../../images/u_4.bmp"); // unknown darker variant
 
         public void updateScreenie()
         {
@@ -544,35 +551,50 @@ namespace GroundPenetratingRadar
         // 1-8 are straightforward
         // 9 is a mine
         // 10 is an unclicked tile
-        public int TileID(int i, int j)
+        public int TileID(int r, int c)
         {
-            Bitmap actual = tileImage(i, j);
+
+            Bitmap actual = tileImage(r, c);
+
+            
+            if (r == 5 & c == 15)
+            {
+                Debug.WriteLine("");
+            }
+
             //code below used while debugging to save a copy of the image of the tile to file
             //scr.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
-            if (imgCom(actual, i0)) { return 0; }
-            if (imgCom(actual, i1)) { return 1; }
-            if (imgCom(actual, i2)) { return 2; }
-            if (imgCom(actual, i3)) { return 3; }
-            if (imgCom(actual, i4)) { return 4; }
-            if (imgCom(actual, i5)) { return 5; }
-            if (imgCom(actual, i6)) { return 6; }
-            //if (imgCom(actual, i7)) { return 7; }
-            //if (imgCom(actual, i8)) { return 8; }
-            if (imgCom(actual, i9)) { return 9; }
-            if (imgCom(actual, i10)) { return 10; }
-
+            if (imgCom(actual, i0, 3, true)) { return 0; }
+            if (imgCom(actual, i10_1, 13, false) || 
+                imgCom(actual, i10_2, 13, false) || 
+                imgCom(actual, i10_3, 13, false) || 
+                imgCom(actual, i10_4, 13, false)) { return 10; }
+            if (imgCom(actual, i1, 5, true)) { return 1; }
+            if (imgCom(actual, i2, 5, true)) { return 2; }
+            if (imgCom(actual, i3, 5, true)) { return 3; }
+            if (imgCom(actual, i4, 5, true)) { return 4; }
+            if (imgCom(actual, i5, 5, true)) { return 5; }
+            if (imgCom(actual, i6, 5, true)) { return 6; }
+            //if (imgCom(actual, i7, 5, true)) { return 7; }
+            //if (imgCom(actual, i8, 5, true)) { return 8; }
+            if (imgCom(actual, i9, 5, true)) {
+                return 9;
+            }
+            
+            
+            //imgSim(actual, i0, true)
             //actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
             //scr.Save("c:\\Users\\Lou\\Desktop\\board.png", ImageFormat.Png);
             //if all else fails
-            errorMessage("Could not identify tile ID at row: " + i.ToString() + ", column: " + j.ToString());
+            errorMessage("Could not identify tile ID at row: " + r.ToString() + ", column: " + c.ToString());
             Environment.Exit(0);
             return 0;
         }
 
-        public Bitmap tileImage (int i, int j)
+        public Bitmap tileImage (int r, int c)
         {
-            int x = j * 18;
-            int y = i * 18;
+            int x = c * 18;
+            int y = r * 18;
             // Clone a portion of the Bitmap object.
             Rectangle cloneRect = new Rectangle(x, y, 18, 18);
             return scr.Clone(cloneRect, scr.PixelFormat);
@@ -581,8 +603,33 @@ namespace GroundPenetratingRadar
         //compare two images for similarity
         //returns 1 for within 20% tolerance
         //returns 0 for out of tolerance, -1 for size mismatch
-        static Boolean imgCom(Bitmap im1, Bitmap im2)
+        static int imgSim(Bitmap im1, Bitmap im2, Boolean offFlag)
         {
+
+            int offset = 0;
+            if (offFlag) { offset = 3; }
+
+            float diff = 0;
+
+            for (int y = offset; y < im1.Height - offset; y++)
+            {
+                for (int x = offset; x < im1.Width - offset; x++)
+                {
+                    diff += (float)Math.Abs(im1.GetPixel(x, y).R - im2.GetPixel(x, y).R) / 255;
+                    diff += (float)Math.Abs(im1.GetPixel(x, y).G - im2.GetPixel(x, y).G) / 255;
+                    diff += (float)Math.Abs(im1.GetPixel(x, y).B - im2.GetPixel(x, y).B) / 255;
+                }
+            }
+            return (int) (100 * diff / (im1.Width * im1.Height * 3));
+
+        }
+
+        static Boolean imgCom(Bitmap im1, Bitmap im2, int tol, Boolean offFlag)
+        {
+
+            //for some tiles there can be multiple permeatations of shadows on the edge, this flag enabled effectively crops those out
+            int offset = 0;
+            if (offFlag) { offset = 3; }
 
             if (im1.Size.Height != 18 || im1.Size.Width != 18)
             {
@@ -593,22 +640,22 @@ namespace GroundPenetratingRadar
             if (im2.Size.Height != 18 || im2.Size.Width != 18)
             {
                 errorMessage("bad input to imgCom");
-                Environment.Exit(0); 
+                Environment.Exit(0);
                 return false;
             }
 
             float diff = 0;
 
-            for (int y = 0; y < im1.Height; y++)
+            for (int y = offset; y < im1.Height - offset; y++)
             {
-                for (int x = 0; x < im1.Width; x++)
+                for (int x = offset; x < im1.Width - offset; x++)
                 {
                     diff += (float)Math.Abs(im1.GetPixel(x, y).R - im2.GetPixel(x, y).R) / 255;
                     diff += (float)Math.Abs(im1.GetPixel(x, y).G - im2.GetPixel(x, y).G) / 255;
                     diff += (float)Math.Abs(im1.GetPixel(x, y).B - im2.GetPixel(x, y).B) / 255;
                 }
             }
-            if (20 > 100 * diff / (im1.Width * im1.Height * 3))  { return true; } else { return false; }
+            if (tol > 100 * diff / (im1.Width * im1.Height * 3)) { return true; } else { return false; }
 
         }
 
