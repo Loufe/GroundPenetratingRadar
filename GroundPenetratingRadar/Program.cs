@@ -73,14 +73,36 @@ namespace GroundPenetratingRadar
             Debug.WriteLine("Left clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
         }
 
-        //send right click
-        public static void rightClick(int x, int y)
+        //send left click
+        public static void DoubleLeftClick(int r, int c)
         {
-            int xpos = 109 + x * 18;
-            int ypos = 109 + y * 18;
-            SetCursorPos(xpos, ypos);
-            mouse_event(MOUSEEVENTF_RIGHTDOWN, xpos, ypos, 0, 0);
-            mouse_event(MOUSEEVENTF_RIGHTUP, xpos, ypos, 0, 0);
+            int ypos = (int)(65536.0 / 1080 * (109 + r * 18));
+            int xpos = (int)(65536.0 / 1920 * (109 + c * 18));
+
+            mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            System.Threading.Thread.Sleep(100);
+            mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+
+            Debug.WriteLine("Double left clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
+        }
+
+        //send right click
+        public static void RightClick(int y, int x)
+        {
+            // add code to make this independant of screen size: Rectangle screenSize = Screen.PrimaryScreen.Bounds;
+            int ypos = (int)(65536.0 / 1080 * (109 + y * 18));
+            int xpos = (int)(65536.0 / 1920 * (109 + x * 18));
+
+            //SetCursorPos(xpos, ypos);
+            mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+            mouse_event(MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+
+            Debug.WriteLine("Right clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
+
         }
 
         //pop up an alert box for the user with provided message
@@ -148,34 +170,50 @@ namespace GroundPenetratingRadar
                 images.updateScreenie();
                 UpdateGrid(boards, images);
                 //printBoard(boards); for console debugging
-                
                 //first do a check for obvious moves, and if any are found, save them as basicResults
                 var basicResults = CheckBasics(boards);
 
                 //printBoard(boards)
 
+
                 if (basicResults.Item1.Count != 0 || basicResults.Item2.Count != 0)
                 {
-                    printBoard(boards);
-                    while (basicResults.Item1.Count != 0)
-                    {
-                        int[] pos = basicResults.Item1.Pop();
-                        //DoubleLeftClick(boards, pos[0], pos[1]);
-                    }
-                    while (basicResults.Item2.Count != 0)
+                    //printBoard(boards);
+                    while (basicResults.Item2.Count != 0) // right clicks
                     {
                         int[] pos = basicResults.Item2.Pop();
-                        //RightClick(boards, pos[0], pos[1]);
+                        System.Threading.Thread.Sleep(3000);
+                        RightClick(pos[0], pos[1]);
                     }
+                    while (basicResults.Item1.Count != 0) // double left clicks
+                    {
+                        int[] pos = basicResults.Item1.Pop();
+                        System.Threading.Thread.Sleep(1000);
+                        DoubleLeftClick(pos[0], pos[1]);
+                    }
+
                 } else { //if advanced
 
-                    // check heuristics
-                    // call basic inverted edge reading
-                    Debug.WriteLine("no basic moves found");//go to advanced
-                    SetForegroundWindow(proci32);
+                    var advancedResults = CheckAdvanced(boards);
+                    
+                    if (advancedResults.Item1.Count != 0)
+                    {
+
+                    } else
+                    {
+                        complete = true;
+
+
+                        // check heuristics
+                        // call basic inverted edge reading
+                        Debug.WriteLine("no basic moves found");//go to advanced // //printBoard(boards);
+                        SetForegroundWindow(proci32);
+                    }
+
+
                 } 
 
-                complete = true;
+
             }
         }
 
@@ -339,18 +377,13 @@ namespace GroundPenetratingRadar
         }
         */
 
-        // given a passed position in nodes, determine neighbouring mine and empty count and do something about it
+        // given a parameter-passed position in nodes, determine neighbouring mine and empty counts
         static (Boolean, Stack<int[]>) CheckTouching(Boards boards, int r, int c)
         {
-            /*
-            if (r == 9 && c == 14)
-            {
-                Debug.WriteLine("WE HIT THE PROBLEMED CASE HERE");
-            }
-            */
+
             int num = boards.nodes[r, c];
             int mines = 0, unknowns = 0;
-            int[,] tiles = new int[8, 3];
+            int[,] tiles = new int[8, 3]; // one for each side + corner, 3 for x, y, state?
             Boolean doubleClick = false;
             Stack<int[]> rightClicks = new Stack<int[]>();
 
@@ -392,25 +425,29 @@ namespace GroundPenetratingRadar
             {
                 boards.nodes[r, c] = 0;
             }
-            else if (num == unknowns || num == (mines + unknowns)) // set all sides to done
-            {
-                boards.nodes[r, c] = 0;
-                for (int i = 0; i < 8; i++)
-                {
-                    int[] tmp = new int[2];
-                    tmp[0] = tiles[i, 0]; tmp[1] = tiles[i, 1];
-                    if (tiles[i, 2] == 1 && boards.nodes[tiles[i, 0], tiles[i, 1]] == 10)
-                    {
-                        boards.nodes[tiles[i, 0], tiles[i, 1]] = 9;
-                        rightClicks.Push(tmp);
-                    }
-                }
-            }
             else if (num == mines)
             {
                 doubleClick = true;
                 boards.nodes[r, c] = 0;
             }
+            else if (num == (mines + unknowns)) // set all sides to done
+            {
+                boards.nodes[r, c] = 0;
+                // look through side tiles for those which must be actioned
+                for (int i = 0; i < 8; i++)
+                {
+                    // don't reclick flagged tiles (it'll unflag them)
+                    if (tiles[i, 2] == 1 && boards.nodes[tiles[i, 0], tiles[i, 1]] == 10)
+                    {
+                        int[] tmp = new int[2];
+                        tmp[0] = tiles[i, 0]; tmp[1] = tiles[i, 1];
+                        boards.nodes[tiles[i, 0], tiles[i, 1]] = 9; //printBoard(boards);
+                        rightClicks.Push(tmp); 
+                        
+                    }
+                }
+            }
+
 
             Debug.WriteLine("Checking tile r=" + r.ToString() + " c=" + c.ToString());
 
@@ -478,16 +515,6 @@ namespace GroundPenetratingRadar
             }
         }
 
-        /*
-        private Image ScreenGrab()
-        {
-
-            return null;
-        }
-        */
-
-        //do some fancy shit on the matrix and try to find where some moves are
-
     }
 
     public class Boards
@@ -524,7 +551,8 @@ namespace GroundPenetratingRadar
 
         public Bitmap scr = initializeScreenie(540, 288); // holds the current game board screenshot
         public Bitmap i1 = new Bitmap(@"../../images/1.bmp");
-        public Bitmap i2 = new Bitmap(@"../../images/2.bmp");
+        public Bitmap i2_1 = new Bitmap(@"../../images/2_1.bmp");
+        public Bitmap i2_2 = new Bitmap(@"../../images/2_2.bmp");
         public Bitmap i3 = new Bitmap(@"../../images/3.bmp");
         public Bitmap i4 = new Bitmap(@"../../images/4.bmp");
         public Bitmap i5 = new Bitmap(@"../../images/5.bmp");
@@ -532,7 +560,10 @@ namespace GroundPenetratingRadar
         //public Bitmap i7 = new Bitmap(@"../../images/7.bmp");
         //public Bitmap i8 = new Bitmap(@"../../images/8.bmp");
         public Bitmap i0 = new Bitmap(@"../../images/e.bmp"); // empty
-        public Bitmap i9 = new Bitmap(@"../../images/f.bmp"); // flag
+        public Bitmap i9_1 = new Bitmap(@"../../images/f_1.bmp"); // flag lightest variant
+        public Bitmap i9_2 = new Bitmap(@"../../images/f_2.bmp"); // flag light variant
+        public Bitmap i9_3 = new Bitmap(@"../../images/f_3.bmp"); // flag dark variant
+        public Bitmap i9_4 = new Bitmap(@"../../images/f_4.bmp"); // flag darker variant
         public Bitmap i10_1 = new Bitmap(@"../../images/u_1.bmp"); // unknown lightest variant
         public Bitmap i10_2 = new Bitmap(@"../../images/u_2.bmp"); // unknown light variant
         public Bitmap i10_3 = new Bitmap(@"../../images/u_3.bmp"); // unknown dark variant
@@ -556,33 +587,36 @@ namespace GroundPenetratingRadar
 
             Bitmap actual = tileImage(r, c);
 
-            
+            /*
             if (r == 5 & c == 15)
             {
                 Debug.WriteLine("");
-            }
+            }*/
 
             //code below used while debugging to save a copy of the image of the tile to file
             //scr.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
-            if (imgCom(actual, i0, 3, true)) { return 0; }
-            if (imgCom(actual, i10_1, 13, false) || 
-                imgCom(actual, i10_2, 13, false) || 
-                imgCom(actual, i10_3, 13, false) || 
-                imgCom(actual, i10_4, 13, false)) { return 10; }
+            if (imgCom(actual, i9_1, 7, true) ||
+                imgCom(actual, i9_2, 7, true) ||
+                imgCom(actual, i9_3, 7, true) ||
+                imgCom(actual, i9_4, 7, true)) { return 9; }
+            if (imgCom(actual, i0, 4, true)) { return 0; }
+            if (imgCom(actual, i10_1, 5, true) || 
+                imgCom(actual, i10_2, 5, true) || 
+                imgCom(actual, i10_3, 5, true) || 
+                imgCom(actual, i10_4, 5, true)) { return 10; }
             if (imgCom(actual, i1, 5, true)) { return 1; }
-            if (imgCom(actual, i2, 5, true)) { return 2; }
+            if (imgCom(actual, i2_1, 5, true) ||
+                imgCom(actual, i2_2, 5, true)) { return 2; }
             if (imgCom(actual, i3, 5, true)) { return 3; }
             if (imgCom(actual, i4, 5, true)) { return 4; }
             if (imgCom(actual, i5, 5, true)) { return 5; }
             if (imgCom(actual, i6, 5, true)) { return 6; }
             //if (imgCom(actual, i7, 5, true)) { return 7; }
             //if (imgCom(actual, i8, 5, true)) { return 8; }
-            if (imgCom(actual, i9, 5, true)) {
-                return 9;
-            }
-            
-            
-            //imgSim(actual, i0, true)
+
+
+
+            //imgSim(actual, i10_1, true)
             //actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
             //scr.Save("c:\\Users\\Lou\\Desktop\\board.png", ImageFormat.Png);
             //if all else fails
