@@ -12,9 +12,14 @@ using System.Drawing.Imaging;
 using System.Windows.Forms;
 using SimWinInput;
 using System.Threading;
+using System.IO;
+using System.Runtime.Serialization.Formatters.Binary;
 
 namespace GroundPenetratingRadar
 {
+
+    
+
 
     class Program
     {
@@ -58,7 +63,7 @@ namespace GroundPenetratingRadar
         }
 
         //send left click
-        public static void LeftClick(int y, int x)
+        public static void LeftClick(int y, int x, StringBuilder log)
         {
             // add code to make this independant of screen size: Rectangle screenSize = Screen.PrimaryScreen.Bounds;
             int ypos = (int)(65536.0 / 1080 * (109 + y * 18));
@@ -71,11 +76,13 @@ namespace GroundPenetratingRadar
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
 
-            Debug.WriteLine("Left clicked (GUESSED) at x: " + xpos.ToString() + ", y: " + ypos.ToString());
+            String tmp = "Left clicked (GUESSED) at x: " + xpos.ToString() + ", y: " + ypos.ToString();
+            Debug.WriteLine(tmp);
+            log.AppendLine(tmp);
         }
 
         //send left click
-        public static void DoubleLeftClick(int r, int c)
+        public static void DoubleLeftClick(int r, int c, StringBuilder log)
         {
             int ypos = (int)(65536.0 / 1080 * (109 + r * 18));
             int xpos = (int)(65536.0 / 1920 * (109 + c * 18));
@@ -87,7 +94,9 @@ namespace GroundPenetratingRadar
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
 
-            Debug.WriteLine("Double left clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
+            String tmp = "Double left clicked at (r: " + r.ToString() + ", c: " + c.ToString() + "" + ") x: " + xpos.ToString() + ", y: " + ypos.ToString();
+            Debug.WriteLine(tmp);
+            log.AppendLine(tmp);
         }
 
         //send right click
@@ -155,17 +164,17 @@ namespace GroundPenetratingRadar
             Images[] images = new Images[threadCount];
             int[] block = new int[threadCount];
             for (int p=0; p < threadCount; p++) { images[p] = new Images(); block[p]=0; }
-
-
-            //for debugging: Screenie(proc);
-
-            System.Threading.Thread.Sleep(200);
-
-            //Make the first move. 8,15 is the middle, i.e. the spot the least likely to get corner stuck
-            LeftClick(8, 15);
-            //UpdateGridByPoint(boards, 8, 15); -- currently useless given the structural changes accompanying the parallel recognition changes
+        
+            System.Threading.Thread.Sleep(50); //why is this here? **re-evaluate later**
 
             Boolean complete = false;
+
+            //ge the log going
+            StringBuilder log = new StringBuilder();
+
+            //Make the first move. 8,15 is the middle, i.e. the spot the least likely to get corner stuck
+            LeftClick(8, 15, log);
+            //UpdateGridByPoint(boards, 8, 15); -- currently useless given the structural changes accompanying the parallel recognition changes
 
             // main loop, baby
             while (complete == false)
@@ -176,9 +185,15 @@ namespace GroundPenetratingRadar
                 for (int p = 0; p<threadCount; p++) { images[p].updateScreenie(); }
                 
                 //upgrade the grid using the new parallel processing method
-                UpdateGridParallel(boards, images, block);
-                
-                //printBoard(boards.nodes); for console debugging
+                UpdateGridParallel(boards, images, block, log);
+
+                if (boards.nodes == boards.nodesReduced)
+                {
+                    MessageBox.Show("Reduced and nodes are equivalent", "WHAT",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+
+                printBoard(boards.nodes, log, false); //for console debugging
                 //first do a check for obvious moves, and if any are found, save them as basicResults
                 var basicResults = CheckBasics(boards);
 
@@ -196,16 +211,14 @@ namespace GroundPenetratingRadar
                     {
                         int[] pos = basicResults.Item1.Pop();
                         System.Threading.Thread.Sleep(50);
-                        DoubleLeftClick(pos[0], pos[1]);
-                        isGameOver(images[0]); // check this every iteration to catch a game lost
+                        DoubleLeftClick(pos[0], pos[1], log);
+                        isGameOver(images[0], log); // check this every iteration to catch a game lost
                     }
 
                 } else { // if there were no easy moves found use the advanced system
 
-                    
-
                     // check if advanced methodology yields any moves
-                    var advancedResults = CheckAdvanced(boards);
+                    var advancedResults = CheckAdvanced(boards, log);
                     
                     // if moves found, execute
                     if (advancedResults.Item2.Count != 0)
@@ -219,10 +232,10 @@ namespace GroundPenetratingRadar
                         System.Threading.Thread.Sleep(50);
 
                         pos = advancedResults.Item1.Pop(); // double left clicks
-                        DoubleLeftClick(pos[0], pos[1]);
+                        DoubleLeftClick(pos[0], pos[1], log);
                         System.Threading.Thread.Sleep(50);
                         pos = advancedResults.Item1.Pop();
-                        DoubleLeftClick(pos[0], pos[1]);
+                        DoubleLeftClick(pos[0], pos[1], log);
                         System.Threading.Thread.Sleep(50);
 
                         if (advancedResults.Item1.Count > 0)
@@ -232,9 +245,9 @@ namespace GroundPenetratingRadar
 
                     } else {
 
-                        randomClick(boards);
+                        randomClick(boards, log);
                         System.Threading.Thread.Sleep(50);
-                        isGameOver(images[0]);
+                        isGameOver(images[0], log);
                         // consider expansion of advanced method set by adding a further way to determine moves
                     }
 
@@ -249,7 +262,12 @@ namespace GroundPenetratingRadar
         {
             for (int i = 0; i < 16; i++)
             {
-                Debug.WriteLine("Row: " + i.ToString());
+                if (i < 10)
+                {
+                    Debug.WriteLine("Row:  " + i.ToString());
+                } else {
+                    Debug.WriteLine("Row: " + i.ToString());
+                }
                 for (int j = 0; j < 30; j++)
                 {
                     if (boards.nodes[i, j] == 10)
@@ -261,18 +279,23 @@ namespace GroundPenetratingRadar
         }
 
         // threaded image comparison (incomplete)
-        static void UpdateGridParallel(Boards boards, Images[] images, int[] block) {
+        static void UpdateGridParallel(Boards boards, Images[] images, int[] block, StringBuilder log) {
 
             //Stack<int[]> unknownPoints = new Stack<int[]>();
             List<int[]> unknownPoints = new List<int[]>();
+            int[] tmpTileIDs = new int[8];
+            Boolean badGuessLock = false;
+
             for (int i = 0; i < 16; i++)
             {
                 for (int j = 0; j < 30; j++)
                 {
                     if (boards.nodes[i, j] == 10)
                     {
-                        int[] tmp = new int[2];
-                        tmp[0] = i; tmp[1] = j;
+                        int[] tmp = new int[3];
+                        tmp[0] = i; tmp[1] = j; // co-ords
+                        //tmp[2] = 0; // a binary switch to tell parallel a point is good (b/c parallel not doing its fucking job)
+                        //tmp[3] = 0; // a counter for the number of waits the program does for appropriate thread sleeping
                         unknownPoints.Add(tmp);
                         //unknownPoints.Push(tmp);
                     }
@@ -284,38 +307,59 @@ namespace GroundPenetratingRadar
                 // add unkown tiles to an available images object (i.e. give a tile to an available worker)
                 Parallel.ForEach(unknownPoints, new ParallelOptions { MaxDegreeOfParallelism = 8 }, (pt) =>
                 {
-                    for (int i = 0; i < block.Length; i++) //block on image class instance
+                    while (pt[2] == 0) // has this point yet been solved
                     {
-                        if (block[i] == 0)
+                        for (int i = 0; i < block.Length; i++) //block on image class instance
                         {
-                            block[i] = 1; //lock this thread and images class instance
-                            boards.nodes[pt[0], pt[1]] = images[i].TileID(pt[0], pt[1]);
-                            block[i] = 0; //unlock
+                            if (block[i] == 0) // is worker available?
+                            {
+                                block[i] = 1; //lock this thread and images class instance
+
+                                //String blockInformation = "Blocks: ";
+                                //for (int k=0;k<block.Length; k++) { blockInformation += block[k].ToString(); }
+                                //Console.WriteLine(blockInformation);
+
+                                tmpTileIDs[i] = images[i].TileID(pt[0], pt[1]);
+                                if (tmpTileIDs[i] != -1) // -1 being the ID program didn't know wtf it saw
+                                {
+                                    boards.nodes[pt[0], pt[1]] = tmpTileIDs[i];
+                                    pt[2] = 1; // no need to wait for a semaphore to come free
+                                }
+                                else // making the (thus-far-in-testing valid) assumption that that means game over
+                                {
+                                    if (!badGuessLock)
+                                    {
+                                        badGuessLock = true;
+                                        badGuess(log);
+                                    }
+                                }
+                                block[i] = 0; //unlock
+                            }
                         }
+                        if (pt[2] == 0) { Thread.Sleep(5); }
                     }
                 });
-            }
-            else
-            {
-                badGuess();
+            } else {
+                badGuess(log);
             }
 
             //Debug.WriteLine("Finished image ID using multi-threaded experiment (was I faster?)");
         }
 
         // save a couple lines of code elsewhere by simplifying this code into this
-        static void isGameOver(Images images)
+        static void isGameOver(Images images, StringBuilder log)
         {
             images.updateScreenie();
             if (images.checkLost())
             {
-                badGuess();
+                badGuess(log);
             }
         }
 
         // bad guess made, quit and tell the user
-        static void badGuess ()
+        static void badGuess (StringBuilder log)
         {
+            File.WriteAllText("C:\\Users\\Lou\\Desktop\\log.txt", log.ToString());
             MessageBox.Show("The bot was forced to make a random guess which was, unfortunately, a mine.", "Failed",
                             MessageBoxButtons.OK, MessageBoxIcon.Error);
             Environment.Exit(0);
@@ -467,21 +511,22 @@ namespace GroundPenetratingRadar
         // 1-8 are straightforward
         // 9 is a mine
         // 10 is an unclicked tile
-        static (Stack<int[]>, Stack<int[]>) CheckAdvanced(Boards boards)
+        static (Stack<int[]>, Stack<int[]>) CheckAdvanced(Boards boards, StringBuilder log)
         {
             Stack<int[]> doubleClicks = new Stack<int[]>();
             Stack<int[]> rightClicks = new Stack<int[]>();
             Boolean moveFound = false;
 
             UpdateReduced(boards); // create the reduced values copy of nodes
-            printBoard(boards.nodesReduced);
+            printBoard(boards.nodesReduced, log, true);
+            //printBoard(boards.nodesReduced);
 
             // horizontal 1-2-1 adaptive
             for (int r = 0; r < 15; r++)
             {
                 for (int c = 0; c < 28; c++)
                 {
-                    if (!moveFound) // because im lazy we're gonna find one advanced move at a time
+                    if (!moveFound) // sole move already found
                     {
                         if (boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r, c + 1] == 2 &&
                             boards.nodesReduced[r, c + 2] == 1 && boards.nodesReduced[r + 1, c] == 10 &&
@@ -519,7 +564,7 @@ namespace GroundPenetratingRadar
                 {
                     for (int c = 0; c < 29; c++)
                     {
-                        if (!moveFound) // because im lazy we're gonna find one advanced move at a time
+                        if (!moveFound) // sole move already found
                         {
                             if (boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r + 1, c] == 2 &&
                                 boards.nodesReduced[r + 2, c] == 1 && boards.nodesReduced[r, c + 1] == 10 &&
@@ -671,7 +716,7 @@ namespace GroundPenetratingRadar
             }
 
 
-            Debug.WriteLine("Checking tile r=" + r.ToString() + " c=" + c.ToString());
+            //Debug.WriteLine("Checking tile r=" + r.ToString() + " c=" + c.ToString());
 
             //tuple with info
             return (doubleClick, rightClicks);
@@ -697,49 +742,81 @@ namespace GroundPenetratingRadar
         }
 
         //prints a copy of the board as understood by the nodes array in the console for debugging purposes
-        static void printBoard(int[,] nodes)
+        static void printBoard(int[,] nodes, StringBuilder log, Boolean reduced)
         {
-            Debug.WriteLine("Beginning board debug print");
+            String line;
+            if (reduced)
+            {
+                Debug.WriteLine("Beginning reduced board print");
+                log.AppendLine("Beginning reduced board print");
+            } else
+            {
+                Debug.WriteLine("Beginning real board print");
+                log.AppendLine("Beginning real board print");
+            }
+
+            line = "row ";
+            for (int i=0; i<30; i++) { if (i < 10) { line += "c" + i.ToString() + " "; } else { line += "c" + i.ToString(); } }
+            Debug.WriteLine(line);
+            log.AppendLine(line);
+
             for (int r = 0; r < 16; r++)
             {
+                if (r < 10) {
+                    line = "r" + r.ToString() + ":  ";
+                } else {
+                    line = "r" + r.ToString() + ": ";
+                }
+                
                 for (int c = 0; c < 30; c++)
                 { 
-                    //uniformity of spacing for all values < 10
-                    if (nodes[r, c] == 10)
+                    //uniformity of spacing for all values < 10 and > -1
+                    if (nodes[r, c] == 10 || nodes[r, c] < 0)
                     {
-                        Debug.Write(nodes[r, c].ToString() + " ");
+                        line += nodes[r, c].ToString() + " ";
                     } else
                     {
-                        Debug.Write(nodes[r, c].ToString() + "  ");
+                        line += nodes[r, c].ToString() + "  ";
                     }
                 }
-                Debug.WriteLine("");
+                Debug.WriteLine(line);
+                log.AppendLine(line);
             }
         }
 
         //....
-        static void randomClick(Boards boards)
+        static void randomClick(Boards boards, StringBuilder log)
         {
-            Boolean done = false;
-            while (!done)
+            List<int[]> unknownPoints = new List<int[]>();
+
+            for (int r = 0; r<16; r++)
             {
-                Random r1 = new Random();
-                Random r2 = new Random();
-                int rInt1 = r1.Next(0, 16);
-                int rInt2 = r2.Next(0, 30);
-                if (boards.nodes[rInt1,rInt2] == 10)
+                for (int c = 0; c<30; c++)
                 {
-                    done = true;
-                    LeftClick(rInt1, rInt2);
+                    if (boards.nodes[r,c] == 10)
+                    {
+                        int[] pts = new int[2];
+                        pts[0] = r; pts[1] = c;
+                        unknownPoints.Add(pts);
+                    }
                 }
             }
+
+            Random random = new Random();
+            int selection = random.Next(0,unknownPoints.Count);
+
+            int[] ptSelected = new int[2];
+            ptSelected = unknownPoints[selection];
+            LeftClick(ptSelected[0],ptSelected[1], log);
+
         }
 
         // when advanced strategy is required a reduced localized mine count is required
         // this function makes a copy of nodes then reduces
         public static void UpdateReduced(Boards boards)
         {
-            boards.nodesReduced = boards.nodes;
+            
+            boards.nodesReduced = (int[,])boards.nodes.Clone();
             for (int r = 0; r < 16; r++)
             {
                 for (int c = 0; c < 30; c++)
@@ -799,7 +876,8 @@ namespace GroundPenetratingRadar
         public Bitmap i4_2 = new Bitmap(@"../../images/4_2.bmp");
         public Bitmap i5_1 = new Bitmap(@"../../images/5_1.bmp");
         public Bitmap i5_2 = new Bitmap(@"../../images/5_2.bmp");
-        public Bitmap i6 = new Bitmap(@"../../images/6.bmp");
+        public Bitmap i6_1 = new Bitmap(@"../../images/6_1.bmp");
+        public Bitmap i6_2 = new Bitmap(@"../../images/6_2.bmp");
         //public Bitmap i7 = new Bitmap(@"../../images/7.bmp");
         //public Bitmap i8 = new Bitmap(@"../../images/8.bmp");
         public Bitmap i0_1 = new Bitmap(@"../../images/e_1.bmp"); // empty lighter
@@ -814,8 +892,8 @@ namespace GroundPenetratingRadar
         public Bitmap i10_2 = new Bitmap(@"../../images/u_2.bmp"); // unknown light variant
         public Bitmap i10_3 = new Bitmap(@"../../images/u_3.bmp"); // unknown dark variant
         public Bitmap i10_4 = new Bitmap(@"../../images/u_4.bmp"); // unknown darker variant
-        public Bitmap iBomb = new Bitmap(@"../../images/bomb.bmp"); // an exploded bomb (game is done)
-        public Bitmap iBomb2 = new Bitmap(@"../../images/bomb2.bmp"); // an exploded bomb (game is done) lighter variant
+        //public Bitmap iBomb = new Bitmap(@"../../images/bomb.bmp"); // an exploded bomb (game is done)
+        //public Bitmap iBomb2 = new Bitmap(@"../../images/bomb2.bmp"); // an exploded bomb (game is done) lighter variant
         public Bitmap iLost = new Bitmap(@"../../images/lost.bmp"); // image of the lost text to recognize failed game
 
         public void updateScreenie()
@@ -844,13 +922,20 @@ namespace GroundPenetratingRadar
 
             Bitmap actual = tileImage(r, c);
 
+            /*
+            if (r == 14 & c == 5)
+            {
+                actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
+            }
+            */
+
             if (imgCom(actual, i9_1, 7) ||
                 imgCom(actual, i9_2, 7) ||
                 imgCom(actual, i9_3, 7) ||
-                imgCom(actual, i9_4, 7)) { return 9; }
+                imgCom(actual, i9_4, 7)) { return 9; } // before for pragmatic purposes
             if (imgCom(actual, i0_1, 3) ||
                 imgCom(actual, i0_2, 3) ||
-                imgCom(actual, i0_3, 3)) { return 0; }
+                imgCom(actual, i0_3, 3)) { return 0; } // before for pragmatic purposes
             if (imgCom(actual, i10_0, 5) ||
                 imgCom(actual, i10_1, 5) || 
                 imgCom(actual, i10_2, 5) || 
@@ -866,32 +951,41 @@ namespace GroundPenetratingRadar
                 imgCom(actual, i4_2, 5)) { return 4; }
             if (imgCom(actual, i5_1, 5) ||
                 imgCom(actual, i5_2, 5)) { return 5; }
-            if (imgCom(actual, i6, 5)) { return 6; }
-            if (imgCom(actual, iBomb, 5) ||
-                imgCom(actual, iBomb2, 5))
-            {
-                //should this code and the image for the bomb be erased?
-            }
-            //if (imgCom(actual, i5, 5)) { return 7; }
-            //if (imgCom(actual, ibomb, 5)) { return 8; }
+            if (imgCom(actual, i6_1, 5) ||
+                imgCom(actual, i6_2, 5)) { return 6; } // before for pragmatic purposes
 
             //imgSim(actual, i5)
             //actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
             //scr.Save("c:\\Users\\Lou\\Desktop\\board.png", ImageFormat.Png);
             //if all else fails
-            errorMessage("Could not identify tile ID at row: " + r.ToString() + ", column: " + c.ToString());
-            Environment.Exit(0);
 
-            return 0;
+            return -1; // couldn't ID
+            //errorMessage("Could not identify tile ID at row: " + r.ToString() + ", column: " + c.ToString());
+            //Environment.Exit(0);
         }
 
-        public Bitmap tileImage (int r, int c)
+        public Bitmap tileImage(int r, int c)
         {
             int x = c * 18;
             int y = r * 18;
             // Clone a portion of the Bitmap object.
             Rectangle cloneRect = new Rectangle(x, y, 18, 18);
-            return this.scr.Clone(cloneRect, scr.PixelFormat);
+            Boolean alwaysQuit = true;
+
+            while (alwaysQuit)
+            { 
+                try
+                {
+                    alwaysQuit = false;
+                    return this.scr.Clone(cloneRect, scr.PixelFormat);
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("object was used... how is it escaping the ghetto semaphore?");
+                    System.Threading.Thread.Sleep(10);
+                }
+            }
+            return null; // never reached
         }
 
         //compare two images for similarity
@@ -943,6 +1037,7 @@ namespace GroundPenetratingRadar
         }
     }
 }
+
 
 // 0 is empty or already solved tile
 // 1-8 are straightforward
