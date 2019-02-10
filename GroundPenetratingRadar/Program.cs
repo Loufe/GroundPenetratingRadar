@@ -90,7 +90,7 @@ namespace GroundPenetratingRadar
             mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
-            System.Threading.Thread.Sleep(50);
+            System.Threading.Thread.Sleep(40);
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
 
@@ -182,104 +182,99 @@ namespace GroundPenetratingRadar
                 System.Threading.Thread.Sleep(50);
 
                 //update the screencapture used to identify tiles (for each thread)
-                for (int p = 0; p<threadCount; p++) { images[p].updateScreenie(); }
-                
-                //upgrade the grid using the new parallel processing method
-                UpdateGridParallel(boards, images, block, log);
+                for (int p = 0; p < threadCount; p++) { images[p].updateScreenie(); }
 
-                if (boards.nodes == boards.nodesReduced)
-                {
-                    MessageBox.Show("Reduced and nodes are equivalent", "WHAT",
-                                MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-
+                //Bring the program's internal board representations up to date
+                UpdateGrid(boards, images, block, log); //Analyze screenshots to identify tiles using new parallel processing method
                 printBoard(boards.nodes, log, false); //for console debugging
-                //first do a check for obvious moves, and if any are found, save them as basicResults
-                var basicResults = CheckBasics(boards);
+                UpdateReduced(boards); // create the reduced values copy of nodes
+
+                //Start collecting moves to complete using the basic and heuristic methods
+                var results = CheckBasics(boards); // double left / right
+                var reduced121Results = Check121(boards, log); // double left / right
+                var reduced1221Results = Check1221(boards, log); // double left / right
+                Stack<int[]> edgePatternResults = CheckEdge(boards, log); // only single left
+
+                //merge varying results (moves to do) stacks into results
+                Stack<int[]> doubleClicks = new Stack<int[]>();
+                Stack<int[]> rightClicks = new Stack<int[]>();
+                Stack<int[]> leftClicks = new Stack<int[]>();
+
+                /*
+                if (reduced121Results.Item1.Count != 0 || reduced1221Results.Item1.Count != 0)
+                {
+                    Console.Write("");
+                }
+                */
+
+                //merge double clicks
+                doubleClicks = mergeStacks(results.Item1, reduced121Results.Item1);
+                doubleClicks = mergeStacks(doubleClicks, reduced1221Results.Item1);
+
+                //merge right clicks
+                rightClicks = mergeStacks(results.Item2, reduced121Results.Item2);
+                rightClicks = mergeStacks(rightClicks, reduced1221Results.Item2);
+
+                //transfer left clicks to better named stack
+                leftClicks = edgePatternResults;
 
                 // interpretation of results from the basic check goes here
-                if (basicResults.Item1.Count != 0 || basicResults.Item2.Count != 0)
+                if (doubleClicks.Count != 0 || rightClicks.Count != 0 || leftClicks.Count != 0)
                 {
+
                     //printBoard(boards.nodes);
-                    while (basicResults.Item2.Count != 0) // right clicks
+                    while (rightClicks.Count != 0) // right clicks
                     {
-                        int[] pos = basicResults.Item2.Pop();
-                        System.Threading.Thread.Sleep(50);
+                        int[] pos = rightClicks.Pop();
+                        System.Threading.Thread.Sleep(27);
                         RightClick(pos[0], pos[1]);
+                        //boards.nodes[pos[0], pos[1]] = 9; // save ourselves a millisecond later on
                     }
-                    while (basicResults.Item1.Count != 0) // double left clicks
+                    while (leftClicks.Count != 0) // double left clicks
                     {
-                        int[] pos = basicResults.Item1.Pop();
-                        System.Threading.Thread.Sleep(50);
+                        int[] pos = leftClicks.Pop();
+                        System.Threading.Thread.Sleep(27);
+                        LeftClick(pos[0], pos[1], log);
+                    }
+                    while (doubleClicks.Count != 0) // double left clicks
+                    {
+                        int[] pos = doubleClicks.Pop();
+                        System.Threading.Thread.Sleep(27);
                         DoubleLeftClick(pos[0], pos[1], log);
                         isGameOver(images[0], log); // check this every iteration to catch a game lost
                     }
 
-                } else { // if there were no easy moves found use the advanced system
+                } else {
 
-                    // check if advanced methodology yields any moves
-                    var advancedResults = CheckAdvanced(boards, log);
-                    
-                    // if moves found, execute
-                    if (advancedResults.Item2.Count != 0)
-                    {
-                        // clean this ugly ass code up at some point
-                        int[] pos = advancedResults.Item2.Pop(); // mines to flag
-                        RightClick(pos[0], pos[1]);
-                        System.Threading.Thread.Sleep(50);
-                        pos = advancedResults.Item2.Pop();
-                        RightClick(pos[0], pos[1]);
-                        System.Threading.Thread.Sleep(50);
-
-                        pos = advancedResults.Item1.Pop(); // double left clicks
-                        DoubleLeftClick(pos[0], pos[1], log);
-                        System.Threading.Thread.Sleep(50);
-                        pos = advancedResults.Item1.Pop();
-                        DoubleLeftClick(pos[0], pos[1], log);
-                        System.Threading.Thread.Sleep(50);
-
-                        if (advancedResults.Item1.Count > 0)
-                        {
-                            Debug.Print("what the fuck");
-                        }
-
-                    } else {
-
-                        randomClick(boards, log);
-                        System.Threading.Thread.Sleep(50);
-                        isGameOver(images[0], log);
-                        // consider expansion of advanced method set by adding a further way to determine moves
-                    }
+                    randomClick(boards, log);
+                    System.Threading.Thread.Sleep(50);
+                    isGameOver(images[0], log);
+                    // consider expansion of advanced method set by adding a further way to determine moves
 
                 } 
 
             }
         }
 
-        //method to update grid
-        //checks only those tiles still marked unknown in Nodes, thus saving processing power
-        static void UpdateGrid(Boards boards, Images images)
+        // merges two "moves" stacks while ensuring no duplicates exist in the combined stack
+        static Stack<int[]> mergeStacks(Stack<int[]> baseStack, Stack<int[]> addedStack)
         {
-            for (int i = 0; i < 16; i++)
+            if (addedStack.Count != 0)
             {
-                if (i < 10)
+                while (addedStack.Count != 0)
                 {
-                    Debug.WriteLine("Row:  " + i.ToString());
-                } else {
-                    Debug.WriteLine("Row: " + i.ToString());
-                }
-                for (int j = 0; j < 30; j++)
-                {
-                    if (boards.nodes[i, j] == 10)
+                    int[] pos = addedStack.Pop();
+                    if (!baseStack.Contains(pos))
                     {
-                        boards.nodes[i, j] = images.TileID(i, j);
+                        baseStack.Push(pos);
                     }
                 }
             }
+            return baseStack;
         }
 
-        // threaded image comparison (incomplete)
-        static void UpdateGridParallel(Boards boards, Images[] images, int[] block, StringBuilder log) {
+        // threaded image comparison (still produces the occaisional crash -- to be determined why)
+        static void UpdateGrid(Boards boards, Images[] images, int[] block, StringBuilder log) {
 
             //Stack<int[]> unknownPoints = new Stack<int[]>();
             List<int[]> unknownPoints = new List<int[]>();
@@ -292,12 +287,9 @@ namespace GroundPenetratingRadar
                 {
                     if (boards.nodes[i, j] == 10)
                     {
-                        int[] tmp = new int[3];
+                        int[] tmp = new int[2];
                         tmp[0] = i; tmp[1] = j; // co-ords
-                        //tmp[2] = 0; // a binary switch to tell parallel a point is good (b/c parallel not doing its fucking job)
-                        //tmp[3] = 0; // a counter for the number of waits the program does for appropriate thread sleeping
                         unknownPoints.Add(tmp);
-                        //unknownPoints.Push(tmp);
                     }
                 }
             }
@@ -307,43 +299,37 @@ namespace GroundPenetratingRadar
                 // add unkown tiles to an available images object (i.e. give a tile to an available worker)
                 Parallel.ForEach(unknownPoints, new ParallelOptions { MaxDegreeOfParallelism = 8 }, (pt) =>
                 {
-                    while (pt[2] == 0) // has this point yet been solved
+                    for (int i = 0; i < block.Length; i++) //block on image class instance
                     {
-                        for (int i = 0; i < block.Length; i++) //block on image class instance
+                        if (block[i] == 0) // is worker available?
                         {
-                            if (block[i] == 0) // is worker available?
+                            block[i] = 1; //lock this thread and images class instance
+
+                            //String blockInformation = "Blocks: ";
+                            //for (int k=0;k<block.Length; k++) { blockInformation += block[k].ToString(); }
+                            //Console.WriteLine(blockInformation);
+
+                            tmpTileIDs[i] = images[i].TileID(pt[0], pt[1]);
+                            if (tmpTileIDs[i] != -1) // -1 being the ID program didn't know wtf it saw
                             {
-                                block[i] = 1; //lock this thread and images class instance
-
-                                //String blockInformation = "Blocks: ";
-                                //for (int k=0;k<block.Length; k++) { blockInformation += block[k].ToString(); }
-                                //Console.WriteLine(blockInformation);
-
-                                tmpTileIDs[i] = images[i].TileID(pt[0], pt[1]);
-                                if (tmpTileIDs[i] != -1) // -1 being the ID program didn't know wtf it saw
-                                {
-                                    boards.nodes[pt[0], pt[1]] = tmpTileIDs[i];
-                                    pt[2] = 1; // no need to wait for a semaphore to come free
-                                }
-                                else // making the (thus-far-in-testing valid) assumption that that means game over
-                                {
-                                    if (!badGuessLock)
-                                    {
-                                        badGuessLock = true;
-                                        badGuess(log);
-                                    }
-                                }
-                                block[i] = 0; //unlock
+                                boards.nodes[pt[0], pt[1]] = tmpTileIDs[i];
+                                pt[1] = 1; // no need to wait for a semaphore to come free
                             }
+                            else // making the thus-far-in-testing valid assumption that that means game over
+                            {
+                                if (!badGuessLock)
+                                {
+                                    badGuessLock = true;
+                                    badGuess(log);
+                                }
+                            }
+                            block[i] = 0; //unlock
                         }
-                        if (pt[2] == 0) { Thread.Sleep(5); }
                     }
                 });
             } else {
                 badGuess(log);
             }
-
-            //Debug.WriteLine("Finished image ID using multi-threaded experiment (was I faster?)");
         }
 
         // save a couple lines of code elsewhere by simplifying this code into this
@@ -365,11 +351,9 @@ namespace GroundPenetratingRadar
             Environment.Exit(0);
         }
 
-        //expands a square grid outwards from a point to identify changes, comparing # of unkowns
-        //this method should be replaced with a more efficient edge-huggin-expansion algorithm
-
-            // SHOULD I ERASE? WOULD NEED MAJOR REWRITE TO BE COMPATIBLE WITH THE PARALLEL PROCESSING CHANGES
-
+        /*expands a square grid outwards from a point to identify changes, comparing # of unkowns
+        this method should be replaced with a more efficient edge-huggin-expansion algorithm
+             SHOULD I ERASE? WOULD NEED MAJOR REWRITE TO BE COMPATIBLE WITH THE PARALLEL PROCESSING CHANGES
         static Boolean UpdateGridByPoint(Images images, Boards boards, int r, int c)
         {
             // CURRENTLY: implicit that this is called ONLY after having clicked a point, so check the given point
@@ -452,10 +436,9 @@ namespace GroundPenetratingRadar
                 Debug.WriteLine("Finished scanning box " + counter.ToString());
             }
             return true;
-        }
+        }*/
 
-        //******** try to loop this until no more moves are seen ************
-        // look for basic moves using the # touching and tile count method
+        // look for basic moves using the # touching and tile counts
         static (Stack<int[]>, Stack<int[]>) CheckBasics(Boards boards)
         {
             Stack<int[]> doubleClicks = new Stack<int[]>();
@@ -511,14 +494,13 @@ namespace GroundPenetratingRadar
         // 1-8 are straightforward
         // 9 is a mine
         // 10 is an unclicked tile
-        static (Stack<int[]>, Stack<int[]>) CheckAdvanced(Boards boards, StringBuilder log)
+        static (Stack<int[]>, Stack<int[]>) Check121(Boards boards, StringBuilder log)
         {
             Stack<int[]> doubleClicks = new Stack<int[]>();
             Stack<int[]> rightClicks = new Stack<int[]>();
-            Boolean moveFound = false;
+            //Boolean moveFound = false;
 
-            UpdateReduced(boards); // create the reduced values copy of nodes
-            printBoard(boards.nodesReduced, log, true);
+            //printBoard(boards.nodesReduced, log, true);
             //printBoard(boards.nodesReduced);
 
             // horizontal 1-2-1 adaptive
@@ -526,20 +508,19 @@ namespace GroundPenetratingRadar
             {
                 for (int c = 0; c < 28; c++)
                 {
-                    if (!moveFound) // sole move already found
-                    {
+                    //if (!moveFound) // sole move already found
+                    //{
                         if (boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r, c + 1] == 2 &&
                             boards.nodesReduced[r, c + 2] == 1 && boards.nodesReduced[r + 1, c] == 10 &&
                             boards.nodesReduced[r + 1, c + 1] == 10 && boards.nodesReduced[r + 1, c + 2] == 10)
                         {
                             int[] right1 = new int[2]; int[] right2 = new int[2]; // right clicks
                             right1[0] = r + 1; right1[1] = c; right2[0] = r + 1; right2[1] = c + 2;
-                            //boards.nodes[right1[0], right1[1]] = 9; boards.nodes[right2[0], right2[1]] = 9;
                             rightClicks.Push(right1); rightClicks.Push(right2);
                             int[] double1 = new int[2]; int[] double2 = new int[2]; // double clicks
                             double1[0] = r; double1[1] = c; double2[0] = r; double2[1] = c + 2;
                             doubleClicks.Push(double1); doubleClicks.Push(double2);
-                            moveFound = true;
+                            //moveFound = true;
                         }
                         else
                         if (boards.nodesReduced[r, c] == 10 && boards.nodesReduced[r, c + 1] == 10 &&
@@ -548,59 +529,213 @@ namespace GroundPenetratingRadar
                         {
                             int[] right1 = new int[2]; int[] right2 = new int[2]; // right clicks
                             right1[0] = r; right1[1] = c; right2[0] = r; right2[1] = c + 2;
-                            //boards.nodes[right1[0], right1[1]] = 9; boards.nodes[right2[0], right2[1]] = 9;
                             rightClicks.Push(right1); rightClicks.Push(right2);
                             int[] double1 = new int[2]; int[] double2 = new int[2]; // double clicks
                             double1[0] = r + 1; double1[1] = c; double2[0] = r + 1; double2[1] = c + 2;
                             doubleClicks.Push(double1); doubleClicks.Push(double2);
-                            moveFound = true;
+                            //moveFound = true;
                         }
-                    }
+                    //}
                 }
             }
-            if (!moveFound) // because im lazy we're gonna find one advanced move at a time
-            {
+            //if (!moveFound) // because im lazy we're gonna find one advanced move at a time
+            //{
+                //vertical 1-2-1 adaptive
                 for (int r = 0; r < 14; r++)
                 {
                     for (int c = 0; c < 29; c++)
                     {
-                        if (!moveFound) // sole move already found
-                        {
+                        //if (!moveFound) // sole move already found
+                        //{
                             if (boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r + 1, c] == 2 &&
                                 boards.nodesReduced[r + 2, c] == 1 && boards.nodesReduced[r, c + 1] == 10 &&
                                 boards.nodesReduced[r + 1, c + 1] == 10 && boards.nodesReduced[r + 2, c + 1] == 10)
                             {
                                 int[] right1 = new int[2]; int[] right2 = new int[2]; // right clicks
                                 right1[0] = r; right1[1] = c + 1; right2[0] = r + 2; right2[1] = c + 1;
-                                //boards.nodes[right1[0], right1[1]] = 9; boards.nodes[right2[0], right2[1]] = 9;
                                 rightClicks.Push(right1); rightClicks.Push(right2);
                                 int[] double1 = new int[2]; int[] double2 = new int[2]; // double clicks
                                 double1[0] = r; double1[1] = c; double2[0] = r + 2; double2[1] = c;
                                 doubleClicks.Push(double1); doubleClicks.Push(double2);
-                                moveFound = true;
+                                //moveFound = true;
                             }
-                            else
+                            
                             if (boards.nodesReduced[r, c] == 10 && boards.nodesReduced[r + 1, c] == 10 &&
                                 boards.nodesReduced[r + 2, c] == 10 && boards.nodesReduced[r, c + 1] == 1 &&
                                 boards.nodesReduced[r + 1, c + 1] == 2 && boards.nodesReduced[r + 2, c + 1] == 1)
                             {
-                                int[] right1 = new int[2]; int[] right2 = new int[2]; // right clicks
+                                int[] right1 = new int[2]; int[] right2 = new int[2]; // right clicks 
                                 right1[0] = r; right1[1] = c; right2[0] = r + 2; right2[1] = c;
-                                //boards.nodes[right1[0], right1[1]] = 9; boards.nodes[right2[0], right2[1]] = 9;
                                 rightClicks.Push(right1); rightClicks.Push(right2);
                                 int[] double1 = new int[2]; int[] double2 = new int[2]; // double clicks
                                 double1[0] = r; double1[1] = c + 1; double2[0] = r + 2; double2[1] = c + 1;
                                 doubleClicks.Push(double1); doubleClicks.Push(double2);
-                                moveFound = true;
+                                //moveFound = true;
                             }
-                        }
+                        //}
+                    }
+                }
+            //}
+            return (doubleClicks, rightClicks);
+        }
+
+        static (Stack<int[]>, Stack<int[]>) Check1221(Boards boards, StringBuilder log)
+        {
+            Stack<int[]> doubleClicks = new Stack<int[]>();
+            Stack<int[]> rightClicks = new Stack<int[]>();
+
+            printBoard(boards.nodesReduced, log, true);
+            //printBoard(boards.nodesReduced);
+
+            // horizontal 1-2-2-1 adaptive
+            for (int r = 0; r < 15; r++) // (16 - 1)
+            {
+                for (int c = 0; c < 27; c++) // (30 - 3)
+                {
+                    if (boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r, c+1] == 2
+                        && boards.nodesReduced[r, c+2] == 2 && boards.nodesReduced[r, c+3] == 1
+                        && boards.nodesReduced[r+1, c] == 10 && boards.nodesReduced[r+1, c+1] == 10
+                        && boards.nodesReduced[r+1, c+2] == 10 && boards.nodesReduced[r+1, c+3] == 10)
+                    { //unknowns above
+                        int[] right1 = new int[2]; int[] right2 = new int[2]; int[] double1 = new int[2]; int[] double2 = new int[2];
+                        right1[0] = r+1; right1[1] = c + 1; right2[0] = r+1; right2[1] = c + 2;                        
+                        rightClicks.Push(right1); rightClicks.Push(right2);
+                        double1[0] = r; double1[1] = c + 1; double2[0] = r; double2[1] = c + 2;
+                        doubleClicks.Push(double1); doubleClicks.Push(double2);
+                    }
+                    if (boards.nodesReduced[r, c] == 10 && boards.nodesReduced[r, c + 1] == 10
+                        && boards.nodesReduced[r, c + 2] == 10 && boards.nodesReduced[r, c + 3] == 10
+                        && boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r, c + 1] == 2
+                        && boards.nodesReduced[r, c + 2] == 2 && boards.nodesReduced[r, c + 3] == 1)
+                    { //unknowns below
+                        int[] right1 = new int[2]; int[] right2 = new int[2]; int[] double1 = new int[2]; int[] double2 = new int[2];
+                        right1[0] = r; right1[1] = c + 1; right2[0] = r; right2[1] = c + 2;
+                        rightClicks.Push(right1); rightClicks.Push(right2);
+                        double1[0] = r+1; double1[1] = c + 1; double2[0] = r+1; double2[1] = c + 2;
+                        doubleClicks.Push(double1); doubleClicks.Push(double2);
                     }
                 }
             }
-            //1-2-2-1 adaptive
 
-
+            // vertical 1-2-2-1 adaptive
+            for (int r = 0; r < 13; r++) // (16 - 3)
+            {
+                for (int c = 0; c < 29; c++) // (30 - 1)
+                {
+                    if (boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r+1, c] == 2
+                        && boards.nodesReduced[r+2, c] == 2 && boards.nodesReduced[r+3, c] == 1
+                        && boards.nodesReduced[r, c+1] == 10 && boards.nodesReduced[r+1, c+1] == 10
+                        && boards.nodesReduced[r+2, c+1] == 10 && boards.nodesReduced[r+3, c+1] == 10)
+                    { //unknowns right
+                        int[] right1 = new int[2]; int[] right2 = new int[2]; int[] double1 = new int[2]; int[] double2 = new int[2];
+                        right1[0] = r + 1; right1[1] = c+1; right2[0] = r + 2; right2[1] = c+1;
+                        rightClicks.Push(right1); rightClicks.Push(right2);
+                        double1[0] = r+1; double1[1] = c; double2[0] = r+2; double2[1] = c;
+                        doubleClicks.Push(double1); doubleClicks.Push(double2);
+                    }
+                    if (boards.nodesReduced[r, c] == 10 && boards.nodesReduced[r + 1, c] == 10
+                        && boards.nodesReduced[r + 2, c] == 10 && boards.nodesReduced[r + 3, c] == 10
+                        && boards.nodesReduced[r, c + 1] == 1 && boards.nodesReduced[r + 1, c + 1] == 2
+                        && boards.nodesReduced[r + 2, c + 1] == 2 && boards.nodesReduced[r + 3, c + 1] == 1)
+                    { //unknowns left
+                        int[] right1 = new int[2]; int[] right2 = new int[2]; int[] double1 = new int[2]; int[] double2 = new int[2];
+                        right1[0] = r + 1; right1[1] = c; right2[0] = r + 2; right2[1] = c;
+                        rightClicks.Push(right1); rightClicks.Push(right2);
+                        double1[0] = r + 1; double1[1] = c+1; double2[0] = r + 2; double2[1] = c+1;
+                        doubleClicks.Push(double1); doubleClicks.Push(double2);
+                    }
+                }
+            }
             return (doubleClicks, rightClicks);
+        }
+
+        static Stack<int[]> CheckEdge(Boards boards, StringBuilder log)
+        {
+
+            Stack<int[]> leftClicks = new Stack<int[]>();
+
+            //vertical pattern on top and bottom edges
+            for (int i = 0; i < 28; i++) // (30 - 2)
+            {
+                //top with pattern on left
+                if (   boards.nodesReduced[0, i] == 10  && boards.nodesReduced[1, i] == 10  && boards.nodesReduced[2, i] == 10
+                    && boards.nodesReduced[0, i+1] == 1 && boards.nodesReduced[1, i+1] == 1 && boards.nodesReduced[2, i] == 2
+                    && boards.nodesReduced[0, i+2] == 0 && boards.nodesReduced[1, i+2] == 0 && boards.nodesReduced[2, i+1] == 0)
+                {
+                    int[] coords = new int[2]; //why redeclare locally? see note:redeclaration at the bottom
+                    coords[0] = 2; coords[1] = i;
+                    leftClicks.Push(coords);
+                }
+                //top with pattern on right
+                if (   boards.nodesReduced[0, i+2] == 10 && boards.nodesReduced[1, i+2] == 10 && boards.nodesReduced[2, i+2] == 10
+                    && boards.nodesReduced[0, i+1] == 1  && boards.nodesReduced[1, i+1] == 1  && boards.nodesReduced[2, i+1] == 2
+                    && boards.nodesReduced[0, i] == 0    && boards.nodesReduced[1, i] == 0    && boards.nodesReduced[2, i] == 0)
+                {
+                    int[] coords = new int[2];
+                    coords[0] = 2; coords[1] = i+2;
+                    leftClicks.Push(coords);
+                }
+                //bottom with pattern on left
+                if (   boards.nodesReduced[15, i] == 10  && boards.nodesReduced[14, i] == 10  && boards.nodesReduced[13, i] == 10
+                    && boards.nodesReduced[15, i+1] == 1 && boards.nodesReduced[14, i+1] == 1 && boards.nodesReduced[13, i+1] == 2
+                    && boards.nodesReduced[15, i+2] == 0 && boards.nodesReduced[14, i+2] == 0 && boards.nodesReduced[13, i+2] == 0)
+                {
+                    int[] coords = new int[2];
+                    coords[0] = 13; coords[1] = i;
+                    leftClicks.Push(coords);
+                }
+                //bottom with pattern on right
+                if (   boards.nodesReduced[15, i+2] == 10 && boards.nodesReduced[14, i+2] == 10 && boards.nodesReduced[13, i+2] == 10
+                    && boards.nodesReduced[15, i+1] == 1  && boards.nodesReduced[14, i+1] == 1  && boards.nodesReduced[13, i+1] == 2
+                    && boards.nodesReduced[15, i] == 0    && boards.nodesReduced[14, i] == 0    && boards.nodesReduced[13, i] == 0)
+                {
+                    int[] coords = new int[2];
+                    coords[0] = 13; coords[1] = i+2;
+                    leftClicks.Push(coords);
+                }
+            }
+            //horizontal pattern on left and ride edges
+            for (int i = 0; i < 14; i++)
+            {
+                //left with pattern on top
+                if (   boards.nodesReduced[i, 0] == 10  && boards.nodesReduced[i, 1] == 10  && boards.nodesReduced[i, 2] == 10
+                    && boards.nodesReduced[i+1, 0] == 1 && boards.nodesReduced[i+1, 1] == 1 && boards.nodesReduced[i+1, 2] == 2
+                    && boards.nodesReduced[i+2, 0] == 0 && boards.nodesReduced[i+2, 1] == 0 && boards.nodesReduced[i+2, 2] == 0)
+                {
+                    int[] coords = new int[2]; //why redeclare locally? see note:redeclaration at the bottom
+                    coords[0] = i; coords[1] = 2;
+                    leftClicks.Push(coords);
+                }
+                //left with pattern on bottom
+                if (   boards.nodesReduced[i+2, 0] == 10 && boards.nodesReduced[i+2, 1] == 10 && boards.nodesReduced[i+2, 2] == 10
+                    && boards.nodesReduced[i+1, 0] == 1  && boards.nodesReduced[i+1, 1] == 1  && boards.nodesReduced[i+1, 2] == 2
+                    && boards.nodesReduced[i, 0] == 0    && boards.nodesReduced[i, 1] == 0    && boards.nodesReduced[i, 2] == 0)
+                {
+                    int[] coords = new int[2]; 
+                    coords[0] = i+2; coords[1] = 2;
+                    leftClicks.Push(coords);
+                }
+                //right with pattern on top
+                if (   boards.nodesReduced[i, 29] == 10    && boards.nodesReduced[i, 28] == 10    && boards.nodesReduced[i, 27] == 10
+                    && boards.nodesReduced[i + 1, 29] == 1 && boards.nodesReduced[i + 1, 28] == 1 && boards.nodesReduced[i + 1, 27] == 2
+                    && boards.nodesReduced[i + 2, 29] == 0 && boards.nodesReduced[i + 2, 28] == 0 && boards.nodesReduced[i + 2, 27] == 0)
+                {
+                    int[] coords = new int[2]; 
+                    coords[0] = i; coords[1] = 27;
+                    leftClicks.Push(coords);
+                }
+                //right with pattern on bottom
+                if (   boards.nodesReduced[i+2, 29] == 10 && boards.nodesReduced[i+2, 28] == 10 && boards.nodesReduced[i+2, 27] == 10
+                    && boards.nodesReduced[i+1, 29] == 1  && boards.nodesReduced[i+1, 28] == 1  && boards.nodesReduced[i+1, 27] == 2
+                    && boards.nodesReduced[i, 29] == 0    && boards.nodesReduced[i, 28] == 0    && boards.nodesReduced[i, 27] == 0)
+                {
+                    int[] coords = new int[2]; 
+                    coords[0] = i+2; coords[1] = 27;
+                    leftClicks.Push(coords);
+                }
+            }
+
+            return leftClicks;
         }
 
         // get a simple count of the neighbouring mines
@@ -1043,3 +1178,9 @@ namespace GroundPenetratingRadar
 // 1-8 are straightforward
 // 9 is a mine
 // 10 is an unclicked tile
+
+/* NOTE:REDECLARATION
+ * The stack function works in a counter-intuitive (at least, to me) way. Pushing a varaible to 
+ * the stack does not create a copy of the data but adds a reference. This inhibits using any sort of looping for
+ * stack creation because the 
+*/
