@@ -18,9 +18,6 @@ using System.Runtime.Serialization.Formatters.Binary;
 namespace GroundPenetratingRadar
 {
 
-    
-
-
     class Program
     {
 
@@ -69,9 +66,6 @@ namespace GroundPenetratingRadar
             int ypos = (int)(65536.0 / 1080 * (109 + y * 18));
             int xpos = (int)(65536.0 / 1920 * (109 + x * 18));
 
-            //SimMouse.Click(MouseButtons.Left, xpos, ypos, 10);
-
-            //SetCursorPos(xpos, ypos);
             mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
@@ -90,7 +84,7 @@ namespace GroundPenetratingRadar
             mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
-            System.Threading.Thread.Sleep(40);
+            System.Threading.Thread.Sleep(10);
             mouse_event(MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
 
@@ -100,19 +94,19 @@ namespace GroundPenetratingRadar
         }
 
         //send right click
-        public static void RightClick(int y, int x)
+        public static void RightClick(int y, int x, StringBuilder log)
         {
             // add code to make this independant of screen size: Rectangle screenSize = Screen.PrimaryScreen.Bounds;
             int ypos = (int)(65536.0 / 1080 * (109 + y * 18));
             int xpos = (int)(65536.0 / 1920 * (109 + x * 18));
 
-            //SetCursorPos(xpos, ypos);
             mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
 
-            Debug.WriteLine("Right clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString());
-
+            String tmp = "Right clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString();
+            Console.WriteLine(tmp);
+            log.AppendLine(tmp);
         }
 
         //pop up an alert box for the user with provided message
@@ -169,7 +163,7 @@ namespace GroundPenetratingRadar
 
             Boolean complete = false;
 
-            //ge the log going
+            //get the log going
             StringBuilder log = new StringBuilder();
 
             //Make the first move. 8,15 is the middle, i.e. the spot the least likely to get corner stuck
@@ -208,11 +202,13 @@ namespace GroundPenetratingRadar
                 */
 
                 //merge double clicks
-                doubleClicks = mergeStacks(results.Item1, reduced121Results.Item1);
+                doubleClicks = mergeStacks(doubleClicks, results.Item1);
+                doubleClicks = mergeStacks(doubleClicks, reduced121Results.Item1);
                 doubleClicks = mergeStacks(doubleClicks, reduced1221Results.Item1);
 
                 //merge right clicks
-                rightClicks = mergeStacks(results.Item2, reduced121Results.Item2);
+                rightClicks = mergeStacks(rightClicks, results.Item2);
+                rightClicks = mergeStacks(rightClicks, reduced121Results.Item2);
                 rightClicks = mergeStacks(rightClicks, reduced1221Results.Item2);
 
                 //transfer left clicks to better named stack
@@ -227,8 +223,8 @@ namespace GroundPenetratingRadar
                     {
                         int[] pos = rightClicks.Pop();
                         System.Threading.Thread.Sleep(27);
-                        RightClick(pos[0], pos[1]);
-                        //boards.nodes[pos[0], pos[1]] = 9; // save ourselves a millisecond later on
+                        RightClick(pos[0], pos[1], log);
+                        boards.nodes[pos[0], pos[1]] = 9; // save ourselves a millisecond later on
                     }
                     while (leftClicks.Count != 0) // double left clicks
                     {
@@ -259,17 +255,28 @@ namespace GroundPenetratingRadar
         // merges two "moves" stacks while ensuring no duplicates exist in the combined stack
         static Stack<int[]> mergeStacks(Stack<int[]> baseStack, Stack<int[]> addedStack)
         {
-            if (addedStack.Count != 0)
+            while (addedStack.Count != 0)
             {
-                while (addedStack.Count != 0)
+                
+                int[] pos = new int[2];
+                pos = addedStack.Pop();
+
+                if (!baseStack.Any(item => item[0] == pos[0] && item[1] == pos[1]))
                 {
-                    int[] pos = addedStack.Pop();
-                    if (!baseStack.Contains(pos))
-                    {
-                        baseStack.Push(pos);
-                    }
+                    baseStack.Push(pos);
+                } else
+                {
+                    Console.WriteLine("Caught a duplicate trying to sneak in! at: r=" + pos[0].ToString() + ", c=" + pos[1].ToString());
                 }
+
+                /*
+                if (!baseStack.Contains(pos))
+                {
+                    baseStack.Push(pos);
+                }
+                */
             }
+
             return baseStack;
         }
 
@@ -605,8 +612,8 @@ namespace GroundPenetratingRadar
                     }
                     if (boards.nodesReduced[r, c] == 10 && boards.nodesReduced[r, c + 1] == 10
                         && boards.nodesReduced[r, c + 2] == 10 && boards.nodesReduced[r, c + 3] == 10
-                        && boards.nodesReduced[r, c] == 1 && boards.nodesReduced[r, c + 1] == 2
-                        && boards.nodesReduced[r, c + 2] == 2 && boards.nodesReduced[r, c + 3] == 1)
+                        && boards.nodesReduced[r+1, c] == 1 && boards.nodesReduced[r+1, c + 1] == 2
+                        && boards.nodesReduced[r+1, c + 2] == 2 && boards.nodesReduced[r+1, c + 3] == 1)
                     { //unknowns below
                         int[] right1 = new int[2]; int[] right2 = new int[2]; int[] double1 = new int[2]; int[] double2 = new int[2];
                         right1[0] = r; right1[1] = c + 1; right2[0] = r; right2[1] = c + 2;
@@ -659,8 +666,8 @@ namespace GroundPenetratingRadar
             {
                 //top with pattern on left
                 if (   boards.nodesReduced[0, i] == 10  && boards.nodesReduced[1, i] == 10  && boards.nodesReduced[2, i] == 10
-                    && boards.nodesReduced[0, i+1] == 1 && boards.nodesReduced[1, i+1] == 1 && boards.nodesReduced[2, i] == 2
-                    && boards.nodesReduced[0, i+2] == 0 && boards.nodesReduced[1, i+2] == 0 && boards.nodesReduced[2, i+1] == 0)
+                    && boards.nodesReduced[0, i+1] == 1 && boards.nodesReduced[1, i+1] == 1 && boards.nodesReduced[2, i+1] == 2
+                    && boards.nodesReduced[0, i+2] == 0 && boards.nodesReduced[1, i+2] == 0 && boards.nodesReduced[2, i+2] == 0)
                 {
                     int[] coords = new int[2]; //why redeclare locally? see note:redeclaration at the bottom
                     coords[0] = 2; coords[1] = i;
@@ -844,7 +851,7 @@ namespace GroundPenetratingRadar
                     {
                         int[] tmp = new int[2];
                         tmp[0] = tiles[i, 0]; tmp[1] = tiles[i, 1];
-                        boards.nodes[tiles[i, 0], tiles[i, 1]] = 9; //printBoard(boards.nodes);
+                        //boards.nodes[tiles[i, 0], tiles[i, 1]] = 9; //printBoard(boards.nodes);
                         rightClicks.Push(tmp); 
                     }
                 }
