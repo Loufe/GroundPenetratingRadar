@@ -59,6 +59,16 @@ namespace GroundPenetratingRadar
             bmp.Save("c:\\Users\\Lou\\Desktop\\test.png", ImageFormat.Png);
         }
 
+        //moves the mouse off screen after every move to avoid a particular bug with flags at r=0, c=1
+        public static void moveOffBoard()
+        {
+            // add code to make this independant of screen size: Rectangle screenSize = Screen.PrimaryScreen.Bounds;
+            int ypos = 15352;
+            int xpos = 12937;
+
+            mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
+        }
+
         //send left click
         public static void LeftClick(int y, int x, StringBuilder log)
         {
@@ -103,10 +113,6 @@ namespace GroundPenetratingRadar
             mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_RIGHTDOWN | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
             mouse_event(MOUSEEVENTF_RIGHTUP | MOUSEEVENTF_ABSOLUTE, xpos, ypos, 0, 0);
-
-            String tmp = "Right clicked at x: " + xpos.ToString() + ", y: " + ypos.ToString();
-            Console.WriteLine(tmp);
-            log.AppendLine(tmp);
         }
 
         //pop up an alert box for the user with provided message
@@ -173,10 +179,18 @@ namespace GroundPenetratingRadar
             // main loop, baby
             while (complete == false)
             {
+                moveOffBoard();
                 System.Threading.Thread.Sleep(50);
 
                 //update the screencapture used to identify tiles (for each thread)
                 for (int p = 0; p < threadCount; p++) { images[p].updateScreenie(); }
+
+                /*
+                String tmp2 = "new cycle, pre update grid";
+                Console.WriteLine(tmp2);
+                log.AppendLine(tmp2);
+                printBoard(boards.nodes, log, false);
+                */
 
                 //Bring the program's internal board representations up to date
                 UpdateGrid(boards, images, block, log); //Analyze screenshots to identify tiles using new parallel processing method
@@ -194,20 +208,13 @@ namespace GroundPenetratingRadar
                 Stack<int[]> rightClicks = new Stack<int[]>();
                 Stack<int[]> leftClicks = new Stack<int[]>();
 
-                /*
-                if (reduced121Results.Item1.Count != 0 || reduced1221Results.Item1.Count != 0)
-                {
-                    Console.Write("");
-                }
-                */
-
                 //merge double clicks
-                doubleClicks = mergeStacks(doubleClicks, results.Item1);
+                doubleClicks = mergeStacks(doubleClicks, results.Item1); //merge with empty to filter dupes
                 doubleClicks = mergeStacks(doubleClicks, reduced121Results.Item1);
                 doubleClicks = mergeStacks(doubleClicks, reduced1221Results.Item1);
 
                 //merge right clicks
-                rightClicks = mergeStacks(rightClicks, results.Item2);
+                rightClicks = mergeStacks(rightClicks, results.Item2); //merge with empty to filter dupes
                 rightClicks = mergeStacks(rightClicks, reduced121Results.Item2);
                 rightClicks = mergeStacks(rightClicks, reduced1221Results.Item2);
 
@@ -223,8 +230,17 @@ namespace GroundPenetratingRadar
                     {
                         int[] pos = rightClicks.Pop();
                         System.Threading.Thread.Sleep(27);
-                        RightClick(pos[0], pos[1], log);
-                        boards.nodes[pos[0], pos[1]] = 9; // save ourselves a millisecond later on
+                        if (boards.nodes[pos[0], pos[1]] != 9)
+                        {
+                            RightClick(pos[0], pos[1], log);
+                        } else
+                        {
+                            Console.WriteLine("What in tarnation....?");
+                        }
+                        String tmp = "Right clicked at r=" + pos[0].ToString() + ", c=" + pos[1].ToString() + " previous val=" + boards.nodes[pos[0], pos[1]].ToString();
+                        boards.nodes[pos[0], pos[1]] = 9; // critical
+                        Console.WriteLine(tmp);
+                        log.AppendLine(tmp);
                     }
                     while (leftClicks.Count != 0) // double left clicks
                     {
@@ -280,26 +296,27 @@ namespace GroundPenetratingRadar
             return baseStack;
         }
 
-        // threaded image comparison (still produces the occaisional crash -- to be determined why)
+        // threaded selective image comparisons of board to have the internal representation reflect new board reality
         static void UpdateGrid(Boards boards, Images[] images, int[] block, StringBuilder log) {
 
-            //Stack<int[]> unknownPoints = new Stack<int[]>();
             List<int[]> unknownPoints = new List<int[]>();
             int[] tmpTileIDs = new int[8];
             Boolean badGuessLock = false;
 
-            for (int i = 0; i < 16; i++)
+            for (int r = 0; r < 16; r++)
             {
-                for (int j = 0; j < 30; j++)
+                for (int c = 0; c < 30; c++)
                 {
-                    if (boards.nodes[i, j] == 10)
+                    if (boards.nodes[r, c] == 10)
                     {
                         int[] tmp = new int[2];
-                        tmp[0] = i; tmp[1] = j; // co-ords
+                        tmp[0] = r; tmp[1] = c; // co-ords
                         unknownPoints.Add(tmp);
                     }
                 }
             }
+
+            Console.WriteLine("non-flag count: " + unknownPoints.Count.ToString());
 
             if (!images[0].checkLost()) // a low power (direct image comparison, no tolerance consideration) lost game check
             {
@@ -316,20 +333,25 @@ namespace GroundPenetratingRadar
                             //for (int k=0;k<block.Length; k++) { blockInformation += block[k].ToString(); }
                             //Console.WriteLine(blockInformation);
 
-                            tmpTileIDs[i] = images[i].TileID(pt[0], pt[1]);
-                            if (tmpTileIDs[i] != -1) // -1 being the ID program didn't know wtf it saw
+                            lock (images[i])
                             {
-                                boards.nodes[pt[0], pt[1]] = tmpTileIDs[i];
-                                pt[1] = 1; // no need to wait for a semaphore to come free
-                            }
-                            else // making the thus-far-in-testing valid assumption that that means game over
-                            {
-                                if (!badGuessLock)
+                                tmpTileIDs[i] = images[i].TileID(pt[0], pt[1]);
+
+                                if (tmpTileIDs[i] != -1) // -1 being the ID program didn't know wtf it saw
                                 {
-                                    badGuessLock = true;
-                                    badGuess(log);
+                                    boards.nodes[pt[0], pt[1]] = tmpTileIDs[i];
+                                    pt[1] = 1; // no need to wait for a semaphore to come free
+                                }
+                                else // making the thus-far-in-testing valid assumption that that means game over
+                                {
+                                    if (!badGuessLock)
+                                    {
+                                        badGuessLock = true;
+                                        badGuess(log);
+                                    }
                                 }
                             }
+
                             block[i] = 0; //unlock
                         }
                     }
@@ -656,6 +678,7 @@ namespace GroundPenetratingRadar
             return (doubleClicks, rightClicks);
         }
 
+        //scans the rim of the game board for a 1-1-1 or 1-1-2 pattern move 
         static Stack<int[]> CheckEdge(Boards boards, StringBuilder log)
         {
 
@@ -665,36 +688,36 @@ namespace GroundPenetratingRadar
             for (int i = 0; i < 28; i++) // (30 - 2)
             {
                 //top with pattern on left
-                if (   boards.nodesReduced[0, i] == 10  && boards.nodesReduced[1, i] == 10  && boards.nodesReduced[2, i] == 10
-                    && boards.nodesReduced[0, i+1] == 1 && boards.nodesReduced[1, i+1] == 1 && boards.nodesReduced[2, i+1] == 2
-                    && boards.nodesReduced[0, i+2] == 0 && boards.nodesReduced[1, i+2] == 0 && boards.nodesReduced[2, i+2] == 0)
+                if (   boards.nodes[0, i] == 10  && boards.nodes[1, i] == 10  && boards.nodes[2, i] == 10
+                    && boards.nodes[0, i+1] == 1 && boards.nodes[1, i+1] == 1 && (boards.nodes[2, i+1] == 2 || boards.nodes[2, i + 1] == 1)
+                    && boards.nodes[0, i+2] == 0 && boards.nodes[1, i+2] == 0 && boards.nodes[2, i+2] == 0)
                 {
                     int[] coords = new int[2]; //why redeclare locally? see note:redeclaration at the bottom
                     coords[0] = 2; coords[1] = i;
                     leftClicks.Push(coords);
                 }
                 //top with pattern on right
-                if (   boards.nodesReduced[0, i+2] == 10 && boards.nodesReduced[1, i+2] == 10 && boards.nodesReduced[2, i+2] == 10
-                    && boards.nodesReduced[0, i+1] == 1  && boards.nodesReduced[1, i+1] == 1  && boards.nodesReduced[2, i+1] == 2
-                    && boards.nodesReduced[0, i] == 0    && boards.nodesReduced[1, i] == 0    && boards.nodesReduced[2, i] == 0)
+                if (   boards.nodes[0, i+2] == 10 && boards.nodes[1, i+2] == 10 && boards.nodes[2, i+2] == 10
+                    && boards.nodes[0, i+1] == 1  && boards.nodes[1, i+1] == 1  && (boards.nodes[2, i + 1] == 2 || boards.nodes[2, i + 1] == 1)
+                    && boards.nodes[0, i] == 0    && boards.nodes[1, i] == 0    && boards.nodes[2, i] == 0)
                 {
                     int[] coords = new int[2];
                     coords[0] = 2; coords[1] = i+2;
                     leftClicks.Push(coords);
                 }
                 //bottom with pattern on left
-                if (   boards.nodesReduced[15, i] == 10  && boards.nodesReduced[14, i] == 10  && boards.nodesReduced[13, i] == 10
-                    && boards.nodesReduced[15, i+1] == 1 && boards.nodesReduced[14, i+1] == 1 && boards.nodesReduced[13, i+1] == 2
-                    && boards.nodesReduced[15, i+2] == 0 && boards.nodesReduced[14, i+2] == 0 && boards.nodesReduced[13, i+2] == 0)
+                if (   boards.nodes[15, i] == 10  && boards.nodes[14, i] == 10  && boards.nodes[13, i] == 10
+                    && boards.nodes[15, i+1] == 1 && boards.nodes[14, i+1] == 1 && (boards.nodes[13, i+1] == 2 || boards.nodes[13, i + 1] == 1)
+                    && boards.nodes[15, i+2] == 0 && boards.nodes[14, i+2] == 0 && boards.nodes[13, i+2] == 0)
                 {
                     int[] coords = new int[2];
                     coords[0] = 13; coords[1] = i;
                     leftClicks.Push(coords);
                 }
                 //bottom with pattern on right
-                if (   boards.nodesReduced[15, i+2] == 10 && boards.nodesReduced[14, i+2] == 10 && boards.nodesReduced[13, i+2] == 10
-                    && boards.nodesReduced[15, i+1] == 1  && boards.nodesReduced[14, i+1] == 1  && boards.nodesReduced[13, i+1] == 2
-                    && boards.nodesReduced[15, i] == 0    && boards.nodesReduced[14, i] == 0    && boards.nodesReduced[13, i] == 0)
+                if (   boards.nodes[15, i+2] == 10 && boards.nodes[14, i+2] == 10 && boards.nodes[13, i+2] == 10
+                    && boards.nodes[15, i+1] == 1  && boards.nodes[14, i+1] == 1  && (boards.nodes[13, i + 1] == 2 || boards.nodes[13, i + 1] == 1)
+                    && boards.nodes[15, i] == 0    && boards.nodes[14, i] == 0    && boards.nodes[13, i] == 0)
                 {
                     int[] coords = new int[2];
                     coords[0] = 13; coords[1] = i+2;
@@ -705,36 +728,36 @@ namespace GroundPenetratingRadar
             for (int i = 0; i < 14; i++)
             {
                 //left with pattern on top
-                if (   boards.nodesReduced[i, 0] == 10  && boards.nodesReduced[i, 1] == 10  && boards.nodesReduced[i, 2] == 10
-                    && boards.nodesReduced[i+1, 0] == 1 && boards.nodesReduced[i+1, 1] == 1 && boards.nodesReduced[i+1, 2] == 2
-                    && boards.nodesReduced[i+2, 0] == 0 && boards.nodesReduced[i+2, 1] == 0 && boards.nodesReduced[i+2, 2] == 0)
+                if (   boards.nodes[i, 0] == 10  && boards.nodes[i, 1] == 10  && boards.nodes[i, 2] == 10
+                    && boards.nodes[i+1, 0] == 1 && boards.nodes[i+1, 1] == 1 && (boards.nodes[i+1, 2] == 2 || boards.nodes[i + 1, 2] == 1)
+                    && boards.nodes[i+2, 0] == 0 && boards.nodes[i+2, 1] == 0 && boards.nodes[i+2, 2] == 0)
                 {
                     int[] coords = new int[2]; //why redeclare locally? see note:redeclaration at the bottom
                     coords[0] = i; coords[1] = 2;
                     leftClicks.Push(coords);
                 }
                 //left with pattern on bottom
-                if (   boards.nodesReduced[i+2, 0] == 10 && boards.nodesReduced[i+2, 1] == 10 && boards.nodesReduced[i+2, 2] == 10
-                    && boards.nodesReduced[i+1, 0] == 1  && boards.nodesReduced[i+1, 1] == 1  && boards.nodesReduced[i+1, 2] == 2
-                    && boards.nodesReduced[i, 0] == 0    && boards.nodesReduced[i, 1] == 0    && boards.nodesReduced[i, 2] == 0)
+                if (   boards.nodes[i+2, 0] == 10 && boards.nodes[i+2, 1] == 10 && boards.nodes[i+2, 2] == 10
+                    && boards.nodes[i+1, 0] == 1  && boards.nodes[i+1, 1] == 1  && (boards.nodes[i + 1, 2] == 2 || boards.nodes[i + 1, 2] == 1)
+                    && boards.nodes[i, 0] == 0    && boards.nodes[i, 1] == 0    && boards.nodes[i, 2] == 0)
                 {
                     int[] coords = new int[2]; 
                     coords[0] = i+2; coords[1] = 2;
                     leftClicks.Push(coords);
                 }
                 //right with pattern on top
-                if (   boards.nodesReduced[i, 29] == 10    && boards.nodesReduced[i, 28] == 10    && boards.nodesReduced[i, 27] == 10
-                    && boards.nodesReduced[i + 1, 29] == 1 && boards.nodesReduced[i + 1, 28] == 1 && boards.nodesReduced[i + 1, 27] == 2
-                    && boards.nodesReduced[i + 2, 29] == 0 && boards.nodesReduced[i + 2, 28] == 0 && boards.nodesReduced[i + 2, 27] == 0)
+                if (   boards.nodes[i, 29] == 10    && boards.nodes[i, 28] == 10    && boards.nodes[i, 27] == 10
+                    && boards.nodes[i + 1, 29] == 1 && boards.nodes[i + 1, 28] == 1 && (boards.nodes[i + 1, 27] == 2 || boards.nodes[i + 1, 27] == 1)
+                    && boards.nodes[i + 2, 29] == 0 && boards.nodes[i + 2, 28] == 0 && boards.nodes[i + 2, 27] == 0)
                 {
                     int[] coords = new int[2]; 
                     coords[0] = i; coords[1] = 27;
                     leftClicks.Push(coords);
                 }
                 //right with pattern on bottom
-                if (   boards.nodesReduced[i+2, 29] == 10 && boards.nodesReduced[i+2, 28] == 10 && boards.nodesReduced[i+2, 27] == 10
-                    && boards.nodesReduced[i+1, 29] == 1  && boards.nodesReduced[i+1, 28] == 1  && boards.nodesReduced[i+1, 27] == 2
-                    && boards.nodesReduced[i, 29] == 0    && boards.nodesReduced[i, 28] == 0    && boards.nodesReduced[i, 27] == 0)
+                if (   boards.nodes[i+2, 29] == 10 && boards.nodes[i+2, 28] == 10 && boards.nodes[i+2, 27] == 10
+                    && boards.nodes[i+1, 29] == 1  && boards.nodes[i+1, 28] == 1  && (boards.nodes[i + 1, 27] == 2 || boards.nodes[i + 1, 27] == 1)
+                    && boards.nodes[i, 29] == 0    && boards.nodes[i, 28] == 0    && boards.nodes[i, 27] == 0)
                 {
                     int[] coords = new int[2]; 
                     coords[0] = i+2; coords[1] = 27;
@@ -851,7 +874,7 @@ namespace GroundPenetratingRadar
                     {
                         int[] tmp = new int[2];
                         tmp[0] = tiles[i, 0]; tmp[1] = tiles[i, 1];
-                        //boards.nodes[tiles[i, 0], tiles[i, 1]] = 9; //printBoard(boards.nodes);
+                        //boards.nodes[tiles[i, 0], tiles[i, 1]] = 9; // second instance of this, should delete if bug not fixed
                         rightClicks.Push(tmp); 
                     }
                 }
@@ -969,7 +992,6 @@ namespace GroundPenetratingRadar
                     }
                 }
             }
-
         }
 
     }
@@ -1020,7 +1042,7 @@ namespace GroundPenetratingRadar
         public Bitmap i5_2 = new Bitmap(@"../../images/5_2.bmp");
         public Bitmap i6_1 = new Bitmap(@"../../images/6_1.bmp");
         public Bitmap i6_2 = new Bitmap(@"../../images/6_2.bmp");
-        //public Bitmap i7 = new Bitmap(@"../../images/7.bmp");
+        public Bitmap i7 =   new Bitmap(@"../../images/7.bmp");
         //public Bitmap i8 = new Bitmap(@"../../images/8.bmp");
         public Bitmap i0_1 = new Bitmap(@"../../images/e_1.bmp"); // empty lighter
         public Bitmap i0_2 = new Bitmap(@"../../images/e_2.bmp"); // empty mid
@@ -1065,11 +1087,16 @@ namespace GroundPenetratingRadar
             Bitmap actual = tileImage(r, c);
 
             /*
-            if (r == 14 & c == 5)
+            if ((r == 0 && c==0) || (r==15&&c==29))
             {
-                actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
+                //actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
+                Console.WriteLine((actual.GetPixel(5, 5).R - actual.GetPixel(5, 5).B).ToString());
+                Console.WriteLine("");
             }
             */
+
+            //quick check for tile (note this does not confuse with flags b/c they're premarked (= 9) in nodes)
+            if (isItATile(actual)) { return 10; }
 
             if (imgCom(actual, i9_1, 7) ||
                 imgCom(actual, i9_2, 7) ||
@@ -1094,7 +1121,8 @@ namespace GroundPenetratingRadar
             if (imgCom(actual, i5_1, 5) ||
                 imgCom(actual, i5_2, 5)) { return 5; }
             if (imgCom(actual, i6_1, 5) ||
-                imgCom(actual, i6_2, 5)) { return 6; } // before for pragmatic purposes
+                imgCom(actual, i6_2, 5)) { return 6; }
+            if (imgCom(actual, i7, 5)) {  return 7; }
 
             //imgSim(actual, i5)
             //actual.Save("c:\\Users\\Lou\\Desktop\\tile.png", ImageFormat.Png);
@@ -1112,22 +1140,9 @@ namespace GroundPenetratingRadar
             int y = r * 18;
             // Clone a portion of the Bitmap object.
             Rectangle cloneRect = new Rectangle(x, y, 18, 18);
-            Boolean alwaysQuit = true;
+            //Boolean alwaysQuit = true;
 
-            while (alwaysQuit)
-            { 
-                try
-                {
-                    alwaysQuit = false;
-                    return this.scr.Clone(cloneRect, scr.PixelFormat);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine("object was used... how is it escaping the ghetto semaphore?");
-                    System.Threading.Thread.Sleep(10);
-                }
-            }
-            return null; // never reached
+            return this.scr.Clone(cloneRect, scr.PixelFormat);
         }
 
         //compare two images for similarity
@@ -1149,6 +1164,21 @@ namespace GroundPenetratingRadar
             }
             return (int) (100 * diff / (im1.Width * im1.Height * 3));
 
+        }
+
+        //does a quick single pixel check for an unclicked tile to save processing power
+        static Boolean isItATile(Bitmap im1)
+        {
+            // B (blue) is typically 70 larger than R or G for that pixel, should be a reliable guage
+            if ((im1.GetPixel(15, 14).B - im1.GetPixel(15, 14).R) > 50 && (im1.GetPixel(15, 14).B - im1.GetPixel(15, 14).G) > 50 
+                && (im1.GetPixel(5, 5).R - im1.GetPixel(5, 5).B) < 200 && (im1.GetPixel(5, 5).R - im1.GetPixel(5, 5).G) < 200)
+            {
+                return true;
+            }
+            else
+            {
+                return false;
+            }
         }
 
         //checks the pixels of the images cropping out the 3 pixels on all sides
