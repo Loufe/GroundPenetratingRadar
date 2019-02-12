@@ -1,4 +1,5 @@
-#### A windows-based multi-threaded Minesweeper bot using screen capture and mouse hook technology.
+ # Ground Penetrating Radar
+ #### A windows-based multi-threaded Minesweeper bot using screen capture and mouse hook technology.
 
 This project solves using only what's available visually in the Windows 7 Minesweeper. While still encountering the occaisonal bug, the bot is relatively steady and capable of solving at a breakneck pace. I predict with enough cycles roughly 25 second solve times are possible.
 
