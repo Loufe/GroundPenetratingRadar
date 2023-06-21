@@ -12,3 +12,5 @@ Tasks remaining for anyone looking to contribute and merge:
 -- alternatively, root cause
 - Identify reason why internally understood non-tiles (!= 10) are sent to be checked despite catch.
 - Reduce weight of image comparison.
+
+Video of the bot running: https://www.youtube.com/watch?v=J7uFc7OSMig
